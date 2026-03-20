@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Browse Jobs — Walk-in Interviews</title>
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="../css/dashboard.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="navbar-inner">
+    <a class="navbar-brand" href="user-dashboard.html">🎯 <span>WalkIn</span>Jobs</a>
+    <div class="navbar-links">
+      <a href="user-dashboard.html">Dashboard</a>
+      <a href="browse-jobs.html" class="active">Browse Jobs</a>
+      <a href="mock-interview.html">Mock Interview</a>
+    </div>
+    <div class="navbar-user">
+      <div class="navbar-avatar" id="nav-avatar">U</div>
+      <span id="nav-username">User</span>
+      <button class="btn btn-ghost btn-sm" onclick="handleLogout()">Logout</button>
+    </div>
+  </div>
+</nav>
+
+<!-- Page Header -->
+<div class="page-header">
+  <div class="container">
+    <h1>Browse Walk-in Interviews</h1>
+    <p>Find and book your next interview slot.</p>
+  </div>
+</div>
+
+<div class="container" style="padding-bottom:48px">
+
+  <!-- Active Booking Warning -->
+  <div id="active-warning" class="alert alert-warning hidden">
+    <span>⚠️</span>
+    <div>
+      <strong>You already have an active booking.</strong>
+      <p style="margin:4px 0 0;font-size:0.875rem">
+        Cancel your current booking first before booking a new slot.
+        <a href="user-dashboard.html">View my bookings →</a>
+      </p>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="filter-bar">
+    <input class="form-control" type="text" id="filter-role"
+           placeholder="🔍 Search by role..." oninput="applyFilters()">
+    <input class="form-control" type="text" id="filter-company"
+           placeholder="🏢 Filter by company..." oninput="applyFilters()">
+    <input class="form-control" type="date" id="filter-date"
+           onchange="applyFilters()">
+    <button class="btn btn-ghost btn-sm" onclick="clearFilters()">Clear</button>
+  </div>
+
+  <!-- Results count -->
+  <p id="results-count" class="text-muted mb-2" style="font-size:0.875rem"></p>
+
+  <!-- Jobs Grid -->
+  <div id="jobs-loading" class="text-center">
+    <div class="spinner-lg"></div>
+  </div>
+  <div id="jobs-grid"  class="jobs-grid hidden"></div>
+  <div id="jobs-empty" class="empty-state hidden">
+    <div class="empty-state-icon">🔍</div>
+    <h3>No jobs found</h3>
+    <p>Try adjusting your filters or check back later.</p>
+    <button class="btn btn-ghost mt-2" onclick="clearFilters()">Clear Filters</button>
+  </div>
+
+</div>
+
+<!-- Job Quick-View Modal (for preview only — booking goes to book-slot.html) -->
+<div id="job-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:580px">
+    <div class="modal-header">
+      <h2 id="modal-title">Job Details</h2>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+
+<script src="../js/auth.js"></script>
+<script src="../js/api.js"></script>
+<script>
+  Auth.requireAuth();
+  Auth.updateNavbar();
+
+  let allJobs   = [];
+  let hasActive = false;
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    await Promise.all([checkActiveBooking(), loadJobs()]);
+  });
+
+  // ── Check Active Booking ───────────────────────────────────────
+  async function checkActiveBooking() {
+    if (!Auth.isUser()) return;
+    try {
+      const res = await api.bookings.active();
+      if (res.data) {
+        hasActive = true;
+        document.getElementById('active-warning').classList.remove('hidden');
+      }
+    } catch (_) {}
+  }
+
+  // ── Load Jobs ──────────────────────────────────────────────────
+  async function loadJobs() {
+    try {
+      const res = await api.jobs.list();
+      allJobs   = res.data || [];
+      renderJobs(allJobs);
+    } catch (err) {
+      Toast.error('Failed to load jobs. Please refresh.');
+    } finally {
+      document.getElementById('jobs-loading').classList.add('hidden');
+    }
+  }
+
+  // ── Render Jobs ────────────────────────────────────────────────
+  function renderJobs(jobs) {
+    const grid  = document.getElementById('jobs-grid');
+    const empty = document.getElementById('jobs-empty');
+    const count = document.getElementById('results-count');
+
+    count.textContent = jobs.length > 0
+      ? `Showing ${jobs.length} walk-in interview${jobs.length !== 1 ? 's' : ''}`
+      : '';
+
+    if (jobs.length === 0) {
+      grid.classList.add('hidden');
+      empty.classList.remove('hidden');
+      return;
+    }
+
+    grid.classList.remove('hidden');
+    empty.classList.add('hidden');
+
+    grid.innerHTML = jobs.map(j => {
+      const filled   = j.total_slots > 0
+        ? (j.booked_slots / j.total_slots) * 100 : 0;
+      const fillCls  = filled > 80 ? 'danger' : filled > 50 ? 'warn' : '';
+      const isFull   = j.available_slots <= 0;
+      const initial  = (j.company_name || 'C')[0].toUpperCase();
+      const expLabel = j.experience_max_yrs
+        ? `${j.experience_min_yrs}–${j.experience_max_yrs} yrs`
+        : `${j.experience_min_yrs}+ yrs`;
+
+      return `
+        <div class="job-card">
+
+          <!-- Card Header -->
+          <div class="job-card-header">
+            <div class="company-logo">${initial}</div>
+            <div style="flex:1;min-width:0">
+              <div class="job-title">${j.role_title}</div>
+              <div class="job-company">${j.company_name}</div>
+            </div>
+            <span class="badge ${isFull ? 'badge-danger' : 'badge-success'}">
+              ${isFull ? 'Full' : 'Open'}
+            </span>
+          </div>
+
+          <!-- Meta Pills -->
+          <div class="job-meta">
+            <span class="job-meta-item">📅 ${formatDate(j.interview_date)}</span>
+            <span class="job-meta-item">💼 ${expLabel}</span>
+            ${j.industry
+              ? `<span class="job-meta-item">🏭 ${j.industry}</span>`
+              : ''}
+            ${j.venue_address
+              ? `<span class="job-meta-item">📍 ${j.venue_address.substring(0, 25)}${j.venue_address.length > 25 ? '...' : ''}</span>`
+              : ''}
+          </div>
+
+          <!-- Slots Progress Bar -->
+          <div class="slots-bar" title="${j.booked_slots} of ${j.total_slots} slots filled">
+            <div class="slots-bar-fill ${fillCls}"
+                 style="width:${Math.min(filled, 100)}%"></div>
+          </div>
+          <p style="font-size:0.78rem;color:var(--text-muted);margin-top:4px">
+            ${isFull
+              ? '<span style="color:var(--danger)">All slots filled</span>'
+              : `<span style="color:var(--primary)">${j.available_slots} slot${j.available_slots !== 1 ? 's' : ''} remaining</span>`}
+          </p>
+
+          <!-- Card Footer -->
+          <div class="job-footer">
+            <span class="job-package">₹${j.package_lpa} LPA</span>
+            <div style="display:flex;gap:8px;align-items:center">
+              <!-- Preview button → opens modal -->
+              <button class="btn btn-ghost btn-sm"
+                      onclick="openPreviewModal(${j.id})">
+                Preview
+              </button>
+              <!-- Book button → goes to dedicated booking page -->
+              <a href="book-slot.html?job=${j.id}"
+                 class="btn btn-sm ${isFull || (hasActive) ? 'btn-ghost' : 'btn-primary'}"
+                 ${isFull ? 'onclick="return alertFull(event)"' : ''}
+                 ${hasActive && !isFull ? 'onclick="return alertHasActive(event)"' : ''}>
+                ${isFull ? 'Full' : 'Book Slot →'}
+              </a>
+            </div>
+          </div>
+
+        </div>`;
+    }).join('');
+  }
+
+  // ── Filters ────────────────────────────────────────────────────
+  function applyFilters() {
+    const role    = document.getElementById('filter-role').value.trim().toLowerCase();
+    const company = document.getElementById('filter-company').value.trim().toLowerCase();
+    const date    = document.getElementById('filter-date').value;
+
+    const filtered = allJobs.filter(j => {
+      const matchRole    = !role    || j.role_title.toLowerCase().includes(role);
+      const matchCompany = !company || j.company_name.toLowerCase().includes(company);
+      const matchDate    = !date    || j.interview_date === date;
+      return matchRole && matchCompany && matchDate;
+    });
+
+    renderJobs(filtered);
+  }
+
+  function clearFilters() {
+    document.getElementById('filter-role').value    = '';
+    document.getElementById('filter-company').value = '';
+    document.getElementById('filter-date').value    = '';
+    renderJobs(allJobs);
+  }
+
+  // ── Alert helpers for disabled book buttons ────────────────────
+  function alertFull(e) {
+    e.preventDefault();
+    Toast.warning('This job has no available slots.');
+    return false;
+  }
+
+  function alertHasActive(e) {
+    e.preventDefault();
+    Toast.warning('Cancel your current booking before booking a new slot.');
+    return false;
+  }
+
+  // ── Preview Modal (read-only quick view) ───────────────────────
+  async function openPreviewModal(jobId) {
+    document.getElementById('job-modal').classList.remove('hidden');
+    document.getElementById('modal-body').innerHTML =
+      '<div class="text-center" style="padding:32px"><div class="spinner-lg"></div></div>';
+
+    try {
+      const res = await api.jobs.get(jobId);
+      const job = res.data;
+      const isFull = job.available_slots <= 0;
+
+      document.getElementById('modal-title').textContent = job.role_title;
+
+      document.getElementById('modal-body').innerHTML = `
+
+        <!-- Company + Meta -->
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+          <div class="company-logo" style="width:48px;height:48px;font-size:1.2rem">
+            ${(job.company_name || 'C')[0].toUpperCase()}
+          </div>
+          <div>
+            <div style="font-weight:700">${job.company_name}</div>
+            <div style="font-size:0.85rem;color:var(--text-muted)">
+              ${job.industry || ''}
+            </div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;
+                    font-size:0.875rem;margin-bottom:16px">
+          <div><span class="text-muted">Package</span><br>
+               <strong style="color:var(--primary)">₹${job.package_lpa} LPA</strong></div>
+          <div><span class="text-muted">Date</span><br>
+               <strong>${formatDate(job.interview_date)}</strong></div>
+          <div><span class="text-muted">Experience</span><br>
+               <strong>${job.experience_min_yrs}${job.experience_max_yrs
+                 ? '–' + job.experience_max_yrs : '+'} years</strong></div>
+          <div><span class="text-muted">Slots Left</span><br>
+               <strong style="color:${isFull ? 'var(--danger)' : 'var(--primary)'}">
+                 ${isFull ? 'Full' : job.available_slots + ' available'}
+               </strong></div>
+        </div>
+
+        ${job.venue_address
+          ? `<div class="alert alert-info" style="margin-bottom:16px;font-size:0.875rem">
+               📍 ${job.venue_address}
+             </div>`
+          : ''}
+
+        <hr class="divider">
+
+        <h4 style="margin-bottom:8px">About the Role</h4>
+        <p style="font-size:0.875rem;color:var(--text-secondary);
+                  line-height:1.7;max-height:120px;overflow-y:auto">
+          ${job.job_description}
+        </p>
+
+        <hr class="divider">
+
+        <h4 style="margin-bottom:12px">Available Time Slots</h4>
+        <div class="slots-list" style="pointer-events:none">
+          ${(job.slots || []).map(s => `
+            <div class="slot-chip ${s.status === 'full' ? 'full' : ''}"
+                 style="cursor:default">
+              <div class="slot-time">
+                ${formatTime(s.start_time)} – ${formatTime(s.end_time)}
+              </div>
+              <div class="slot-remain">
+                ${s.status === 'full' ? 'Full' : s.remaining + ' left'}
+              </div>
+            </div>`).join('')}
+        </div>
+
+        <hr class="divider">
+
+        <!-- CTA -->
+        <div style="display:flex;gap:10px">
+          <button class="btn btn-ghost btn-full" onclick="closeModal()">
+            Close
+          </button>
+          <a href="book-slot.html?job=${job.id}"
+             class="btn btn-full ${isFull || hasActive ? 'btn-ghost' : 'btn-primary'}"
+             ${isFull    ? 'onclick="alertFull(event)"'      : ''}
+             ${hasActive && !isFull ? 'onclick="alertHasActive(event)"' : ''}>
+            ${isFull ? 'No Slots Available' : 'Book This Slot →'}
+          </a>
+        </div>`;
+
+    } catch (err) {
+      Toast.error('Failed to load job details.');
+      closeModal();
+    }
+  }
+
+  function closeModal() {
+    document.getElementById('job-modal').classList.add('hidden');
+  }
+
+  // Close modal on overlay click
+  document.getElementById('job-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+  });
+
+  // ── Logout ─────────────────────────────────────────────────────
+  async function handleLogout() {
+    try { await api.auth.logout(); } catch (_) {}
+    Auth.logout();
+    window.location.href = '../pages/login.html';
+  }
+</script>
+</body>
+</html>
+```
+
+---

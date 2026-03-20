@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Company Dashboard — Walk-in Interviews</title>
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="../css/dashboard.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="navbar-inner">
+    <a class="navbar-brand" href="company-dashboard.html">🎯 <span>WalkIn</span>Hire</a>
+    <div class="navbar-links">
+      <a href="company-dashboard.html" class="active">Dashboard</a>
+      <a href="company-post-job.html">Post Job</a>
+    </div>
+    <div class="navbar-user">
+      <div class="navbar-avatar" id="nav-avatar">C</div>
+      <span id="nav-username">Company</span>
+      <button class="btn btn-ghost btn-sm" onclick="handleLogout()">Logout</button>
+    </div>
+  </div>
+</nav>
+
+<div class="dashboard-layout">
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-label">Company</div>
+      <a class="sidebar-link active" href="company-dashboard.html">
+        <span class="icon">🏠</span> Dashboard
+      </a>
+      <a class="sidebar-link" href="company-post-job.html">
+        <span class="icon">➕</span> Post Walk-in
+      </a>
+      <a class="sidebar-link" href="#" onclick="showSection('jobs-section')">
+        <span class="icon">📋</span> My Jobs
+      </a>
+    </div>
+    <div class="sidebar-section">
+      <button class="sidebar-link" onclick="handleLogout()">
+        <span class="icon">🚪</span> Logout
+      </button>
+    </div>
+  </aside>
+
+  <main class="main-content">
+
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon green">📋</div>
+        <div>
+          <div class="stat-value" id="stat-total-jobs">—</div>
+          <div class="stat-label">Total Jobs</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon blue">✅</div>
+        <div>
+          <div class="stat-value" id="stat-active-jobs">—</div>
+          <div class="stat-label">Active Jobs</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon amber">👥</div>
+        <div>
+          <div class="stat-value" id="stat-bookings">—</div>
+          <div class="stat-label">Total Bookings</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon purple">📅</div>
+        <div>
+          <div class="stat-value" id="stat-upcoming">—</div>
+          <div class="stat-label">Upcoming</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Posted Jobs -->
+    <div class="card" id="jobs-section">
+      <div class="card-header">
+        <h2>Posted Walk-ins</h2>
+        <a href="company-post-job.html" class="btn btn-primary btn-sm">+ Post New</a>
+      </div>
+
+      <div id="jobs-loading" class="text-center" style="padding:40px">
+        <div class="spinner-lg"></div>
+      </div>
+      <div id="jobs-content" class="hidden"></div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Bookings Modal -->
+<div id="bookings-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:680px">
+    <div class="modal-header">
+      <h2 id="modal-job-title">Bookings</h2>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div id="modal-bookings-body">
+      <div class="spinner-lg"></div>
+    </div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+
+<script src="../js/auth.js"></script>
+<script src="../js/api.js"></script>
+<script>
+  Auth.requireRole('company');
+  Auth.updateNavbar();
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    await Promise.all([loadDashboard(), loadJobs()]);
+  });
+
+  async function loadDashboard() {
+    try {
+      const res   = await api.company.dashboard();
+      const stats = res.data;
+      document.getElementById('stat-total-jobs').textContent  = stats.total_jobs;
+      document.getElementById('stat-active-jobs').textContent = stats.active_jobs;
+      document.getElementById('stat-bookings').textContent    = stats.total_bookings;
+      document.getElementById('stat-upcoming').textContent    = stats.upcoming_interviews;
+    } catch (_) {}
+  }
+
+  async function loadJobs() {
+    try {
+      const res  = await api.company.jobs();
+      const jobs = res.data || [];
+
+      document.getElementById('jobs-loading').classList.add('hidden');
+      const content = document.getElementById('jobs-content');
+      content.classList.remove('hidden');
+
+      if (jobs.length === 0) {
+        content.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">📋</div>
+            <h3>No walk-ins posted yet</h3>
+            <p>Post your first walk-in interview to start receiving candidates.</p>
+            <a href="company-post-job.html" class="btn btn-primary mt-2">Post Walk-in</a>
+          </div>`;
+        return;
+      }
+
+      const statusBadge = (s) => {
+        const map = { active: 'badge-success', closed: 'badge-gray',
+                      cancelled: 'badge-danger', draft: 'badge-warning' };
+        return `<span class="badge ${map[s] || 'badge-gray'}">${s}</span>`;
+      };
+
+      content.innerHTML = `
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Role</th><th>Date</th><th>Package</th>
+                <th>Bookings</th><th>Status</th><th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${jobs.map(j => `
+                <tr>
+                  <td><strong>${j.role_title}</strong></td>
+                  <td>${formatDate(j.interview_date)}</td>
+                  <td>₹${j.package_lpa} LPA</td>
+                  <td>${j.booked_slots} / ${j.total_slots}</td>
+                  <td>${statusBadge(j.status)}</td>
+                  <td style="display:flex;gap:6px;flex-wrap:wrap">
+                    <button class="btn btn-ghost btn-sm"
+                            onclick="viewBookings(${j.id}, '${j.role_title}')">
+                      Bookings
+                    </button>
+                    ${j.status === 'active'
+                      ? `<button class="btn btn-danger btn-sm"
+                                 onclick="closeJob(${j.id})">Close</button>`
+                      : ''}
+                  </td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    } catch (err) {
+      Toast.error('Failed to load jobs.');
+    }
+  }
+
+  async function viewBookings(jobId, title) {
+    document.getElementById('modal-job-title').textContent = `Bookings — ${title}`;
+    document.getElementById('bookings-modal').classList.remove('hidden');
+    document.getElementById('modal-bookings-body').innerHTML =
+      '<div class="spinner-lg"></div>';
+
+    try {
+      const res      = await api.company.jobBookings(jobId);
+      const bookings = res.data || [];
+
+      if (bookings.length === 0) {
+        document.getElementById('modal-bookings-body').innerHTML =
+          '<div class="empty-state"><p>No bookings yet.</p></div>';
+        return;
+      }
+
+      document.getElementById('modal-bookings-body').innerHTML = `
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Name</th><th>Email</th><th>Phone</th>
+                  <th>Slot</th><th>Code</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              ${bookings.map(b => `
+                <tr>
+                  <td>${b.full_name}</td>
+                  <td>${b.email}</td>
+                  <td>${b.phone || '—'}</td>
+                  <td>${formatTime(b.start_time)} – ${formatTime(b.end_time)}</td>
+                  <td><span class="booking-code">${b.confirmation_code}</span></td>
+                  <td><span class="badge ${b.status === 'confirmed'
+                    ? 'badge-success' : 'badge-gray'}">${b.status}</span></td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    } catch (_) {
+      Toast.error('Failed to load bookings.');
+    }
+  }
+
+  async function closeJob(jobId) {
+    if (!confirm('Close this job posting? Candidates will no longer be able to book.')) return;
+    try {
+      await api.company.updateStatus(jobId, 'closed');
+      Toast.success('Job closed.');
+      loadJobs();
+    } catch (err) {
+      Toast.error(err.message || 'Failed to close job.');
+    }
+  }
+
+  function closeModal() {
+    document.getElementById('bookings-modal').classList.add('hidden');
+  }
+
+  async function handleLogout() {
+    try { await api.auth.logout(); } catch (_) {}
+    Auth.logout();
+    window.location.href = '../pages/login.html';
+  }
+
+  function showSection(id) {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Book Interview Slot — Walk-in Interviews</title>
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="../css/dashboard.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="navbar-inner">
+    <a class="navbar-brand" href="user-dashboard.html">🎯 <span>WalkIn</span>Jobs</a>
+    <div class="navbar-links">
+      <a href="user-dashboard.html">Dashboard</a>
+      <a href="browse-jobs.html">Browse Jobs</a>
+      <a href="mock-interview.html">Mock Interview</a>
+    </div>
+    <div class="navbar-user">
+      <div class="navbar-avatar" id="nav-avatar">U</div>
+      <span id="nav-username">User</span>
+      <button class="btn btn-ghost btn-sm" onclick="handleLogout()">Logout</button>
+    </div>
+  </div>
+</nav>
+
+<!-- Page Header -->
+<div class="page-header">
+  <div class="container-md">
+    <a href="browse-jobs.html"
+       style="font-size:0.875rem;color:var(--text-muted);display:inline-flex;
+              align-items:center;gap:6px;margin-bottom:12px">
+      ← Back to Jobs
+    </a>
+    <h1 id="page-title">Book Interview Slot</h1>
+    <p id="page-subtitle" class="text-muted">Select a time slot and confirm your booking.</p>
+  </div>
+</div>
+
+<div class="container-md" style="padding-bottom: 60px">
+
+  <!-- Loading -->
+  <div id="page-loading" class="text-center">
+    <div class="spinner-lg"></div>
+  </div>
+
+  <!-- Active booking warning -->
+  <div id="active-warning" class="alert alert-warning hidden">
+    <span>⚠️</span>
+    <div>
+      <strong>You already have an active booking.</strong>
+      <p style="margin:4px 0 0;font-size:0.875rem">
+        You must cancel your current booking before booking a new slot.
+        <a href="user-dashboard.html">View my bookings →</a>
+      </p>
+    </div>
+  </div>
+
+  <!-- Main Content (hidden until loaded) -->
+  <div id="main-content" class="hidden">
+
+    <div class="grid-2" style="align-items:start; gap:28px">
+
+      <!-- Left: Job Details -->
+      <div>
+        <div class="card mb-3">
+          <div class="card-header">
+            <h3>Job Details</h3>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+            <div class="company-logo" id="company-initial">C</div>
+            <div>
+              <div class="job-title" id="job-role">—</div>
+              <div class="job-company" id="job-company">—</div>
+            </div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:10px;font-size:0.9rem">
+            <div style="display:flex;justify-content:space-between">
+              <span class="text-muted">Package</span>
+              <strong id="job-package" style="color:var(--primary)">—</strong>
+            </div>
+            <div style="display:flex;justify-content:space-between">
+              <span class="text-muted">Interview Date</span>
+              <strong id="job-date">—</strong>
+            </div>
+            <div style="display:flex;justify-content:space-between">
+              <span class="text-muted">Experience</span>
+              <strong id="job-exp">—</strong>
+            </div>
+            <div style="display:flex;justify-content:space-between">
+              <span class="text-muted">Slots Available</span>
+              <strong id="job-slots">—</strong>
+            </div>
+          </div>
+
+          <hr class="divider">
+
+          <div id="job-venue" style="font-size:0.875rem;color:var(--text-secondary)"></div>
+        </div>
+
+        <!-- Job Description -->
+        <div class="card">
+          <h4 style="margin-bottom:12px">About the Role</h4>
+          <p id="job-desc"
+             style="font-size:0.875rem;color:var(--text-secondary);line-height:1.7">
+          </p>
+
+          <div id="job-requirements-section" class="hidden">
+            <hr class="divider">
+            <h4 style="margin-bottom:12px">Requirements</h4>
+            <p id="job-requirements"
+               style="font-size:0.875rem;color:var(--text-secondary);line-height:1.7">
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Slot Picker + Booking -->
+      <div>
+        <div class="card">
+          <h3 style="margin-bottom:6px">Select a Time Slot</h3>
+          <p class="text-muted" style="font-size:0.875rem;margin-bottom:20px">
+            All times are in IST. Choose a slot that works for you.
+          </p>
+
+          <!-- Slots -->
+          <div id="slots-container" class="slots-list"></div>
+
+          <!-- Selected slot summary -->
+          <div id="slot-summary" class="hidden"
+               style="margin-top:20px;padding:14px;background:var(--primary-light);
+                      border-radius:var(--radius-md);border:1px solid var(--primary)">
+            <p style="font-size:0.875rem;margin:0">
+              <strong style="color:var(--primary-dark)">Selected Slot:</strong>
+              <span id="summary-time" style="color:var(--primary-dark)"></span>
+            </p>
+          </div>
+
+          <hr class="divider">
+
+          <!-- Confirm button -->
+          <button class="btn btn-primary btn-full btn-lg"
+                  id="confirm-btn"
+                  onclick="confirmBooking()"
+                  disabled>
+            Confirm Booking
+          </button>
+
+          <p class="text-muted text-center mt-2" style="font-size:0.8rem">
+            A confirmation email will be sent after booking.
+          </p>
+
+          <!-- Practice CTA -->
+          <hr class="divider">
+          <div style="text-align:center">
+            <p style="font-size:0.875rem;color:var(--text-muted);margin-bottom:10px">
+              Want to prepare before the interview?
+            </p>
+            <a href="mock-interview.html" class="btn btn-secondary btn-sm">
+              🤖 Practice with AI Mock Interview
+            </a>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Success State (shown after booking) -->
+  <div id="success-state" class="hidden" style="text-align:center;padding:60px 24px">
+    <div style="font-size:4rem;margin-bottom:16px">🎉</div>
+    <h2 style="margin-bottom:8px">Slot Booked Successfully!</h2>
+    <p class="text-muted" style="margin-bottom:24px">
+      Your confirmation email has been sent. Show your booking code at the venue.
+    </p>
+
+    <div style="background:var(--primary-light);border:1px solid var(--primary);
+                border-radius:var(--radius-lg);padding:20px;max-width:320px;
+                margin:0 auto 28px;text-align:center">
+      <p style="font-size:0.8rem;color:var(--primary-dark);margin-bottom:4px">
+        Confirmation Code
+      </p>
+      <p id="confirm-code"
+         style="font-size:1.5rem;font-weight:800;color:var(--primary);
+                letter-spacing:0.12em;margin:0;font-family:monospace">
+      </p>
+    </div>
+
+    <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+      <a href="user-dashboard.html" class="btn btn-primary">Go to Dashboard</a>
+      <a href="browse-jobs.html"    class="btn btn-ghost">Browse More Jobs</a>
+    </div>
+  </div>
+
+</div>
+
+<div id="toast-container"></div>
+
+<script src="../js/auth.js"></script>
+<script src="../js/api.js"></script>
+<script>
+  Auth.requireRole('user');
+  Auth.updateNavbar();
+
+  let jobData      = null;
+  let selectedSlot = null;
+  let hasActive    = false;
+
+  // ── Read job ID from URL params ────────────────────────────────
+  // Usage: book-slot.html?job=42
+  const params = new URLSearchParams(window.location.search);
+  const jobId  = parseInt(params.get('job'));
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    if (!jobId) {
+      Toast.error('No job specified.');
+      setTimeout(() => window.location.href = 'browse-jobs.html', 1500);
+      return;
+    }
+    await Promise.all([checkActiveBooking(), loadJobDetails()]);
+  });
+
+  // ── Check if user already has an active booking ────────────────
+  async function checkActiveBooking() {
+    try {
+      const res = await api.bookings.active();
+      if (res.data) {
+        hasActive = true;
+        document.getElementById('active-warning').classList.remove('hidden');
+
+        // Disable confirm button
+        const btn = document.getElementById('confirm-btn');
+        if (btn) {
+          btn.disabled  = true;
+          btn.textContent = 'Cancel current booking first';
+        }
+      }
+    } catch (_) {}
+  }
+
+  // ── Load Job Details ───────────────────────────────────────────
+  async function loadJobDetails() {
+    try {
+      const res = await api.jobs.get(jobId);
+      jobData   = res.data;
+
+      // Update page header
+      document.getElementById('page-title').textContent =
+        jobData.role_title;
+      document.getElementById('page-subtitle').textContent =
+        `${jobData.company_name} · ${formatDate(jobData.interview_date)}`;
+
+      // Fill job details card
+      document.getElementById('company-initial').textContent =
+        (jobData.company_name || 'C')[0].toUpperCase();
+      document.getElementById('job-role').textContent    = jobData.role_title;
+      document.getElementById('job-company').textContent = jobData.company_name;
+      document.getElementById('job-package').textContent =
+        `₹${jobData.package_lpa} LPA`;
+      document.getElementById('job-date').textContent    =
+        formatDate(jobData.interview_date);
+      document.getElementById('job-exp').textContent     =
+        `${jobData.experience_min_yrs}${jobData.experience_max_yrs
+          ? '–' + jobData.experience_max_yrs : '+'} years`;
+      document.getElementById('job-slots').textContent   =
+        `${jobData.available_slots} remaining`;
+      document.getElementById('job-desc').textContent    =
+        jobData.job_description;
+
+      if (jobData.venue_address) {
+        document.getElementById('job-venue').innerHTML =
+          `<strong>📍 Venue:</strong> ${jobData.venue_address}`;
+      }
+
+      if (jobData.requirements) {
+        document.getElementById('job-requirements-section').classList.remove('hidden');
+        document.getElementById('job-requirements').textContent =
+          jobData.requirements;
+      }
+
+      // Render slots
+      renderSlots(jobData.slots || []);
+
+      // Show main content
+      document.getElementById('page-loading').classList.add('hidden');
+      document.getElementById('main-content').classList.remove('hidden');
+
+    } catch (err) {
+      Toast.error('Failed to load job details.');
+      setTimeout(() => window.location.href = 'browse-jobs.html', 1500);
+    }
+  }
+
+  // ── Render Slot Chips ──────────────────────────────────────────
+  function renderSlots(slots) {
+    const container = document.getElementById('slots-container');
+
+    if (slots.length === 0) {
+      container.innerHTML =
+        '<p class="text-muted">No time slots available for this job.</p>';
+      return;
+    }
+
+    container.innerHTML = slots.map(slot => {
+      const isFull     = slot.status === 'full' || slot.remaining <= 0;
+      const timeLabel  = `${formatTime(slot.start_time)} – ${formatTime(slot.end_time)}`;
+      const remainLabel = isFull ? 'Full' : `${slot.remaining} seat${slot.remaining !== 1 ? 's' : ''} left`;
+
+      return `
+        <div class="slot-chip ${isFull ? 'full' : ''}"
+             id="slot-${slot.id}"
+             onclick="${!isFull ? `selectSlot(${slot.id}, '${timeLabel}', this)` : ''}">
+          <div class="slot-time">${timeLabel}</div>
+          <div class="slot-remain">${remainLabel}</div>
+        </div>`;
+    }).join('');
+  }
+
+  // ── Select a Slot ──────────────────────────────────────────────
+  function selectSlot(slotId, timeLabel, el) {
+    if (hasActive) {
+      Toast.warning('Please cancel your current booking first.');
+      return;
+    }
+
+    // Deselect all
+    document.querySelectorAll('.slot-chip').forEach(c => {
+      c.classList.remove('selected');
+    });
+
+    // Select clicked
+    el.classList.add('selected');
+    selectedSlot = slotId;
+
+    // Show summary
+    document.getElementById('slot-summary').classList.remove('hidden');
+    document.getElementById('summary-time').textContent = ` ${timeLabel}`;
+
+    // Enable confirm
+    const btn = document.getElementById('confirm-btn');
+    btn.disabled    = false;
+    btn.textContent = 'Confirm Booking';
+  }
+
+  // ── Confirm Booking ────────────────────────────────────────────
+  async function confirmBooking() {
+    if (!selectedSlot) {
+      Toast.warning('Please select a time slot.');
+      return;
+    }
+    if (hasActive) {
+      Toast.warning('Please cancel your existing booking first.');
+      return;
+    }
+
+    const btn = document.getElementById('confirm-btn');
+    setLoading(btn, true, 'Confirming...');
+
+    try {
+      const res     = await api.bookings.create({
+        job_id:  jobId,
+        slot_id: selectedSlot,
+      });
+      const booking = res.data;
+
+      // Show success state
+      document.getElementById('main-content').classList.add('hidden');
+      document.getElementById('success-state').classList.remove('hidden');
+      document.getElementById('confirm-code').textContent =
+        booking.confirmation_code;
+
+      Toast.success('Booking confirmed! Check your email.');
+
+    } catch (err) {
+      Toast.error(err.message || 'Booking failed. Please try again.');
+      setLoading(btn, false);
+    }
+  }
+
+  // ── Logout ─────────────────────────────────────────────────────
+  async function handleLogout() {
+    try { await api.auth.logout(); } catch (_) {}
+    Auth.logout();
+    window.location.href = '../pages/login.html';
+  }
+</script>
+</body>
+</html>

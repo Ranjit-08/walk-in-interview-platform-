@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Dashboard — Walk-in Interviews</title>
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="../css/dashboard.css">
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar">
+  <div class="navbar-inner">
+    <a class="navbar-brand" href="user-dashboard.html">🎯 <span>WalkIn</span>Jobs</a>
+    <div class="navbar-links">
+      <a href="user-dashboard.html" class="active">Dashboard</a>
+      <a href="browse-jobs.html">Browse Jobs</a>
+      <a href="mock-interview.html">Mock Interview</a>
+    </div>
+    <div class="navbar-user">
+      <div class="navbar-avatar" id="nav-avatar">U</div>
+      <span id="nav-username">User</span>
+      <button class="btn btn-ghost btn-sm" onclick="handleLogout()">Logout</button>
+    </div>
+  </div>
+</nav>
+
+<div class="dashboard-layout">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-label">Menu</div>
+      <a class="sidebar-link active" href="user-dashboard.html">
+        <span class="icon">🏠</span> Dashboard
+      </a>
+      <a class="sidebar-link" href="browse-jobs.html">
+        <span class="icon">🔍</span> Browse Jobs
+      </a>
+      <a class="sidebar-link" href="#bookings" onclick="showSection('bookings')">
+        <span class="icon">📅</span> My Bookings
+      </a>
+      <a class="sidebar-link" href="mock-interview.html">
+        <span class="icon">🤖</span> AI Mock Interview
+      </a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Account</div>
+      <button class="sidebar-link" onclick="handleLogout()">
+        <span class="icon">🚪</span> Logout
+      </button>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="main-content">
+
+    <!-- Active Booking Banner -->
+    <div id="active-booking-banner" class="active-booking-banner hidden">
+      <span class="icon">📌</span>
+      <div style="flex:1">
+        <strong>You have an active booking:</strong>
+        <span id="active-booking-info"></span>
+      </div>
+      <button class="btn btn-danger btn-sm" id="cancel-booking-btn">Cancel Booking</button>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon green">📅</div>
+        <div>
+          <div class="stat-value" id="stat-total">—</div>
+          <div class="stat-label">Total Bookings</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon amber">⏳</div>
+        <div>
+          <div class="stat-value" id="stat-upcoming">—</div>
+          <div class="stat-label">Upcoming</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon purple">✅</div>
+        <div>
+          <div class="stat-value" id="stat-completed">—</div>
+          <div class="stat-label">Completed</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon blue">🤖</div>
+        <div>
+          <div class="stat-value" id="stat-sessions">—</div>
+          <div class="stat-label">Mock Sessions</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bookings Section -->
+    <div class="card" id="bookings">
+      <div class="card-header">
+        <h2>My Bookings</h2>
+        <a href="browse-jobs.html" class="btn btn-primary btn-sm">+ Book New Slot</a>
+      </div>
+
+      <div id="bookings-loading" class="text-center" style="padding:40px">
+        <div class="spinner-lg"></div>
+      </div>
+
+      <div id="bookings-content" class="hidden"></div>
+    </div>
+
+    <!-- Recent Mock Sessions -->
+    <div class="card mt-3">
+      <div class="card-header">
+        <h2>Recent Mock Interviews</h2>
+        <a href="mock-interview.html" class="btn btn-secondary btn-sm">Start Practice</a>
+      </div>
+      <div id="sessions-content">
+        <div class="empty-state">
+          <div class="empty-state-icon">🤖</div>
+          <h3>No practice sessions yet</h3>
+          <p>Use our AI Mock Interview to prepare for your interviews.</p>
+          <a href="mock-interview.html" class="btn btn-primary mt-2">Start Now</a>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<div id="toast-container"></div>
+
+<script src="../js/auth.js"></script>
+<script src="../js/api.js"></script>
+<script>
+  // Guard: must be logged in as user
+  Auth.requireRole('user');
+  Auth.updateNavbar();
+
+  // ── On Load ────────────────────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', async () => {
+    await Promise.all([loadActiveBooking(), loadBookings(), loadSessions()]);
+  });
+
+  // ── Active Booking ─────────────────────────────────────────────
+  async function loadActiveBooking() {
+    try {
+      const res = await api.bookings.active();
+      const booking = res.data;
+
+      if (booking) {
+        document.getElementById('active-booking-banner').classList.remove('hidden');
+        document.getElementById('active-booking-info').innerHTML =
+          ` <strong>${booking.role_title}</strong> at <strong>${booking.company_name}</strong>
+            on <strong>${formatDate(booking.interview_date)}</strong>
+            (${formatTime(booking.start_time)} – ${formatTime(booking.end_time)})
+            &nbsp;<span class="booking-code">${booking.confirmation_code}</span>`;
+
+        document.getElementById('cancel-booking-btn').onclick =
+          () => cancelBooking(booking.id);
+      }
+    } catch (_) {}
+  }
+
+  // ── Bookings List ──────────────────────────────────────────────
+  async function loadBookings() {
+    try {
+      const res      = await api.bookings.my();
+      const bookings = res.data || [];
+
+      // Update stats
+      document.getElementById('stat-total').textContent     = bookings.length;
+      document.getElementById('stat-upcoming').textContent  =
+        bookings.filter(b => b.status === 'confirmed').length;
+      document.getElementById('stat-completed').textContent =
+        bookings.filter(b => b.status === 'completed').length;
+
+      document.getElementById('bookings-loading').classList.add('hidden');
+      const content = document.getElementById('bookings-content');
+      content.classList.remove('hidden');
+
+      if (bookings.length === 0) {
+        content.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">📅</div>
+            <h3>No bookings yet</h3>
+            <p>Browse available walk-in interviews and book your slot.</p>
+            <a href="browse-jobs.html" class="btn btn-primary mt-2">Browse Jobs</a>
+          </div>`;
+        return;
+      }
+
+      const statusBadge = (s) => {
+        const map = {
+          confirmed: 'badge-success', cancelled: 'badge-danger',
+          completed: 'badge-info',    no_show: 'badge-warning'
+        };
+        return `<span class="badge ${map[s] || 'badge-gray'}">${s}</span>`;
+      };
+
+      content.innerHTML = `
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Role</th><th>Company</th><th>Date</th>
+                <th>Time</th><th>Code</th><th>Status</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${bookings.map(b => `
+                <tr>
+                  <td><strong>${b.role_title}</strong></td>
+                  <td>${b.company_name}</td>
+                  <td>${formatDate(b.interview_date)}</td>
+                  <td>${formatTime(b.start_time)} – ${formatTime(b.end_time)}</td>
+                  <td><span class="booking-code">${b.confirmation_code}</span></td>
+                  <td>${statusBadge(b.status)}</td>
+                  <td>${b.status === 'confirmed'
+                    ? `<button class="btn btn-danger btn-sm"
+                         onclick="cancelBooking(${b.id})">Cancel</button>`
+                    : ''
+                  }</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    } catch (err) {
+      Toast.error('Failed to load bookings.');
+    }
+  }
+
+  // ── Mock Sessions ──────────────────────────────────────────────
+  async function loadSessions() {
+    try {
+      const res      = await api.interview.sessions();
+      const sessions = res.data || [];
+
+      document.getElementById('stat-sessions').textContent = sessions.length;
+
+      if (sessions.length === 0) return;
+
+      document.getElementById('sessions-content').innerHTML = `
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Role</th><th>Date</th><th>Score</th><th>Status</th></tr></thead>
+            <tbody>
+              ${sessions.slice(0, 5).map(s => `
+                <tr>
+                  <td>${s.role_title || 'General Interview'}</td>
+                  <td>${formatDate(s.started_at)}</td>
+                  <td>${s.score != null
+                    ? `<strong style="color:var(--primary)">${s.score}/100</strong>`
+                    : '—'}</td>
+                  <td><span class="badge ${s.status === 'completed'
+                    ? 'badge-success' : 'badge-warning'}">${s.status}</span></td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    } catch (_) {}
+  }
+
+  // ── Cancel Booking ─────────────────────────────────────────────
+  async function cancelBooking(id) {
+    if (!confirm('Are you sure you want to cancel this booking?')) return;
+    try {
+      await api.bookings.cancel(id);
+      Toast.success('Booking cancelled.');
+      setTimeout(() => location.reload(), 800);
+    } catch (err) {
+      Toast.error(err.message || 'Failed to cancel booking.');
+    }
+  }
+
+  // ── Logout ─────────────────────────────────────────────────────
+  async function handleLogout() {
+    try { await api.auth.logout(); } catch (_) {}
+    Auth.logout();
+    window.location.href = '../pages/login.html';
+  }
+
+  function showSection(id) {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
+  }
+</script>
+</body>
+</html>

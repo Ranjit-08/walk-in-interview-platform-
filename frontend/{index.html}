@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Walk-in Interview Platform</title>
+  <link rel="stylesheet" href="css/main.css">
+  <style>
+    .hero {
+      background: linear-gradient(135deg, #1D9E75 0%, #0F6E56 100%);
+      color: #fff;
+      padding: 80px 24px;
+      text-align: center;
+    }
+    .hero h1 { font-size: 2.8rem; margin-bottom: 16px; color: #fff; }
+    .hero p   { font-size: 1.1rem; opacity: 0.9; max-width: 560px; margin: 0 auto 32px; }
+    .hero-btns { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+    .btn-white {
+      background: #fff; color: var(--primary); border: 2px solid #fff;
+      padding: 12px 28px; border-radius: var(--radius-md);
+      font-weight: 700; font-size: 1rem; cursor: pointer; transition: all 0.2s;
+      text-decoration: none; display: inline-block;
+    }
+    .btn-white:hover { background: transparent; color: #fff; }
+    .btn-outline-white {
+      background: transparent; color: #fff; border: 2px solid rgba(255,255,255,0.6);
+      padding: 12px 28px; border-radius: var(--radius-md);
+      font-weight: 700; font-size: 1rem; cursor: pointer; transition: all 0.2s;
+      text-decoration: none; display: inline-block;
+    }
+    .btn-outline-white:hover { background: rgba(255,255,255,0.15); color: #fff; }
+    .features { padding: 64px 24px; }
+    .feature-card { text-align: center; padding: 32px 24px; }
+    .feature-icon { font-size: 2.5rem; margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="navbar-inner">
+    <div class="navbar-brand">🎯 <span>WalkIn</span>Jobs</div>
+    <div class="navbar-links">
+      <a href="pages/login.html">Login</a>
+      <a href="pages/login.html" class="btn btn-primary btn-sm">Get Started</a>
+    </div>
+  </div>
+</nav>
+
+<div class="hero">
+  <h1>Land Your Dream Job<br>at Walk-in Interviews</h1>
+  <p>Browse hundreds of walk-in interviews, book your slot instantly,
+     and practice with our AI mock interviewer.</p>
+  <div class="hero-btns">
+    <a href="pages/login.html" class="btn-white">Find Interviews</a>
+    <a href="pages/login.html?type=company" class="btn-outline-white">Post Walk-in</a>
+  </div>
+</div>
+
+<div class="features container">
+  <div class="grid-3">
+    <div class="card feature-card">
+      <div class="feature-icon">🔍</div>
+      <h3>Browse & Book</h3>
+      <p class="text-muted">Find walk-in interviews near you and book your slot in seconds.</p>
+    </div>
+    <div class="card feature-card">
+      <div class="feature-icon">🤖</div>
+      <h3>AI Mock Interviews</h3>
+      <p class="text-muted">Practice with our AI interviewer and get instant feedback.</p>
+    </div>
+    <div class="card feature-card">
+      <div class="feature-icon">📧</div>
+      <h3>Instant Confirmation</h3>
+      <p class="text-muted">Get email confirmation with your booking code immediately.</p>
+    </div>
+  </div>
+</div>
+
+<script src="js/auth.js"></script>
+<script>
+  // Redirect if already logged in
+  if (Auth.isLoggedIn()) {
+    window.location.href = Auth.isCompany()
+      ? 'pages/company-dashboard.html'
+      : 'pages/user-dashboard.html';
+  }
+</script>
+</body>
+</html>
