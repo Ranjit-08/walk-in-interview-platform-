@@ -1,0 +1,152 @@
+# deploy-frontend.yml
+# Triggers on push to main branch (frontend/ changes)
+# Steps: Validate → Update API URL → Upload to S3 → Invalidate CloudFront (optional)
+
+name: Deploy Frontend to S3
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/deploy-frontend.yml'
+
+  # Allow manual trigger
+  workflow_dispatch:
+
+jobs:
+
+  # ── Job 1: Validate HTML/JS ──────────────────────────────────────
+  validate:
+    name: Validate Frontend Files
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check all HTML files exist
+        run: |
+          echo "Checking required frontend files..."
+          required_files=(
+            "frontend/index.html"
+            "frontend/pages/login.html"
+            "frontend/pages/user-dashboard.html"
+            "frontend/pages/browse-jobs.html"
+            "frontend/pages/book-slot.html"
+            "frontend/pages/company-dashboard.html"
+            "frontend/pages/company-post-job.html"
+            "frontend/pages/mock-interview.html"
+            "frontend/js/api.js"
+            "frontend/js/auth.js"
+            "frontend/css/main.css"
+            "frontend/css/auth.css"
+            "frontend/css/dashboard.css"
+            "frontend/css/interview.css"
+          )
+          for f in "${required_files[@]}"; do
+            if [ ! -f "$f" ]; then
+              echo "MISSING: $f"
+              exit 1
+            else
+              echo "OK: $f"
+            fi
+          done
+          echo "All required files present!"
+
+      - name: Check API_BASE is not localhost
+        run: |
+          if grep -r "localhost" frontend/js/api.js; then
+            echo "WARNING: api.js still points to localhost!"
+            echo "Make sure API_BASE is set to the API Gateway URL."
+            exit 1
+          fi
+          echo "API_BASE check passed."
+
+  # ── Job 2: Deploy to S3 ──────────────────────────────────────────
+  deploy:
+    name: Upload to S3
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.ref == 'refs/heads/main'
+
+    environment:
+      name: production
+      url: ${{ secrets.S3_WEBSITE_URL }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ secrets.AWS_REGION }}
+
+      - name: Inject API Gateway URL into api.js
+        run: |
+          # Replace the placeholder API_BASE with the real API Gateway URL
+          sed -i "s|https://your-api-gateway-url.execute-api.ap-south-1.amazonaws.com/prod|${{ secrets.API_GATEWAY_URL }}|g" \
+            frontend/js/api.js
+          echo "API_BASE updated to: ${{ secrets.API_GATEWAY_URL }}"
+          grep "API_BASE" frontend/js/api.js
+
+      - name: Sync frontend to S3
+        run: |
+          # Upload HTML files (no cache — always fresh)
+          aws s3 sync frontend/ s3://${{ secrets.S3_BUCKET_NAME }}/ \
+            --delete \
+            --exclude "*.DS_Store" \
+            --exclude ".git/*" \
+            --cache-control "no-cache, no-store, must-revalidate" \
+            --include "*.html"
+
+          # Upload CSS files (cache 1 day)
+          aws s3 sync frontend/css/ s3://${{ secrets.S3_BUCKET_NAME }}/css/ \
+            --cache-control "public, max-age=86400" \
+            --content-type "text/css"
+
+          # Upload JS files (cache 1 day)
+          aws s3 sync frontend/js/ s3://${{ secrets.S3_BUCKET_NAME }}/js/ \
+            --cache-control "public, max-age=86400" \
+            --content-type "application/javascript"
+
+          echo "Frontend synced to S3 bucket: ${{ secrets.S3_BUCKET_NAME }}"
+
+      - name: Set correct content types
+        run: |
+          # Ensure index.html has correct content type
+          aws s3 cp \
+            s3://${{ secrets.S3_BUCKET_NAME }}/index.html \
+            s3://${{ secrets.S3_BUCKET_NAME }}/index.html \
+            --metadata-directive REPLACE \
+            --content-type "text/html; charset=utf-8" \
+            --cache-control "no-cache, no-store, must-revalidate"
+
+      - name: Verify deployment
+        run: |
+          sleep 5
+          response=$(curl -s -o /dev/null -w "%{http_code}" \
+            ${{ secrets.S3_WEBSITE_URL }}/index.html)
+          echo "S3 website response: $response"
+          if [ "$response" != "200" ]; then
+            echo "S3 website check failed!"
+            exit 1
+          fi
+          echo "Frontend deployed and accessible!"
+
+      - name: Print deployment summary
+        if: success()
+        run: |
+          echo "============================================"
+          echo "Frontend Deployment Summary"
+          echo "============================================"
+          echo "S3 Bucket  : ${{ secrets.S3_BUCKET_NAME }}"
+          echo "Website URL: ${{ secrets.S3_WEBSITE_URL }}"
+          echo "API Base   : ${{ secrets.API_GATEWAY_URL }}"
+          echo "Deployed at: $(date -u)"
+          echo "Commit     : ${{ github.sha }}"
+          echo "============================================"
