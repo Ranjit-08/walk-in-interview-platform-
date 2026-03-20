@@ -2,7 +2,7 @@
 // All HTTP calls go through this module.
 // Automatically attaches JWT token and handles errors.
 
-const API_BASE = 'https://your-api-gateway-url.execute-api.ap-south-1.amazonaws.com/prod';
+const API_BASE = 'https://tpoxjnmym9.execute-api.us-east-1.amazonaws.com/prod';
 
 /**
  * Core fetch wrapper.
