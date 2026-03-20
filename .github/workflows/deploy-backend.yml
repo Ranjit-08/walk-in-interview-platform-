@@ -14,7 +14,6 @@ jobs:
   test:
     name: Run Backend Tests
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -36,7 +35,7 @@ jobs:
       - name: Create test .env
         working-directory: backend
         run: |
-          cat > .env << 'EOF'
+          cat > .env << 'ENVEOF'
           FLASK_ENV=testing
           FLASK_SECRET_KEY=test-secret-key
           DB_HOST=localhost
@@ -51,11 +50,11 @@ jobs:
           SES_REGION=us-east-1
           BEDROCK_REGION=us-east-1
           BEDROCK_MODEL_ID=amazon.titan-text-express-v1
-          GROQ_API_KEY=test-groq-key
+          GROQ_API_KEY=test-key
           FRONTEND_URL=http://localhost:3000
           AWS_REGION=us-east-1
           BOOKING_CODE_PREFIX=WI
-          EOF
+          ENVEOF
 
       - name: Run tests
         working-directory: backend
@@ -81,8 +80,7 @@ jobs:
 
       - name: Write .env on EC2
         run: |
-          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} bash << 'ENDSSH'
-          cat > /app/backend/.env << ENVEOF
+          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} "cat > /app/backend/.env << 'ENVEOF'
           FLASK_ENV=production
           FLASK_SECRET_KEY=${{ secrets.FLASK_SECRET_KEY }}
           PORT=5000
@@ -103,8 +101,7 @@ jobs:
           AWS_REGION=us-east-1
           BOOKING_CODE_PREFIX=WI
           ENVEOF
-          chmod 600 /app/backend/.env
-          ENDSSH
+          chmod 600 /app/backend/.env"
 
       - name: Deploy code to EC2
         run: |
@@ -139,10 +136,9 @@ jobs:
           sleep 10
           response=$(curl -s -o /dev/null -w "%{http_code}" \
             ${{ secrets.API_GATEWAY_URL }}/health)
-          echo "API Gateway response: $response"
           if [ "$response" = "200" ]; then
             echo "✅ Deployment verified!"
           else
-            echo "❌ Verification failed"
+            echo "❌ Verification failed: $response"
             exit 1
           fi
