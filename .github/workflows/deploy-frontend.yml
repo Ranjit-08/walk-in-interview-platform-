@@ -1,6 +1,3 @@
-cd /c/terraform/walk-in-interview-platform-
-
-cat > .github/workflows/deploy-frontend.yml << 'EOF'
 name: Deploy Frontend to S3
 
 on:
@@ -13,51 +10,43 @@ on:
   workflow_dispatch:
 
 jobs:
-
   validate:
     name: Validate Frontend Files
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Check all HTML files exist
+      - name: Check files exist
         run: |
-          echo "Checking required frontend files..."
-          required_files=(
-            "frontend/index.html"
-            "frontend/pages/login.html"
-            "frontend/pages/user-dashboard.html"
-            "frontend/pages/browse-jobs.html"
-            "frontend/pages/book-slot.html"
-            "frontend/pages/company-dashboard.html"
-            "frontend/pages/company-post-job.html"
-            "frontend/pages/mock-interview.html"
-            "frontend/js/api.js"
-            "frontend/js/auth.js"
-            "frontend/css/main.css"
-            "frontend/css/auth.css"
-            "frontend/css/dashboard.css"
-            "frontend/css/interview.css"
-          )
-          for f in "${required_files[@]}"; do
+          for f in \
+            "frontend/index.html" \
+            "frontend/pages/login.html" \
+            "frontend/pages/user-dashboard.html" \
+            "frontend/pages/browse-jobs.html" \
+            "frontend/pages/book-slot.html" \
+            "frontend/pages/company-dashboard.html" \
+            "frontend/pages/company-post-job.html" \
+            "frontend/pages/mock-interview.html" \
+            "frontend/js/api.js" \
+            "frontend/js/auth.js" \
+            "frontend/css/main.css" \
+            "frontend/css/auth.css" \
+            "frontend/css/dashboard.css" \
+            "frontend/css/interview.css"; do
             if [ ! -f "$f" ]; then
               echo "MISSING: $f"
               exit 1
-            else
-              echo "OK: $f"
             fi
+            echo "OK: $f"
           done
-          echo "All required files present!"
 
-      - name: Check API_BASE is configured
+      - name: Check API_BASE configured
         run: |
           if grep -q "your-api-gateway-url" frontend/js/api.js; then
-            echo "WARNING: api.js still has placeholder URL!"
+            echo "ERROR: api.js has placeholder URL"
             exit 1
           fi
-          echo "API_BASE check passed:"
           grep "API_BASE" frontend/js/api.js
 
   deploy:
@@ -65,7 +54,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate
     if: github.ref == 'refs/heads/main'
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -73,75 +61,41 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region:            ${{ secrets.AWS_REGION }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Inject API Gateway URL into api.js
+      - name: Inject API Gateway URL
         run: |
-          sed -i "s|https://your-api-gateway-url.execute-api.ap-south-1.amazonaws.com/prod|${{ secrets.API_GATEWAY_URL }}|g" \
-            frontend/js/api.js
-          echo "API_BASE after update:"
+          sed -i "s|https://your-api-gateway-url.execute-api.ap-south-1.amazonaws.com/prod|${{ secrets.API_GATEWAY_URL }}|g" frontend/js/api.js
           grep "API_BASE" frontend/js/api.js
 
-      - name: Sync HTML files to S3
+      - name: Sync to S3
         run: |
           aws s3 sync frontend/ s3://${{ secrets.S3_BUCKET_NAME }}/ \
             --delete \
             --exclude "*.DS_Store" \
-            --exclude ".git/*" \
-            --cache-control "no-cache, no-store, must-revalidate" \
-            --include "*.html"
-          echo "HTML files synced"
+            --exclude ".git/*"
+          echo "Synced to S3"
 
-      - name: Sync CSS files to S3
+      - name: Fix content types
         run: |
-          aws s3 sync frontend/css/ s3://${{ secrets.S3_BUCKET_NAME }}/css/ \
-            --cache-control "public, max-age=86400" \
-            --content-type "text/css"
-          echo "CSS files synced"
-
-      - name: Sync JS files to S3
-        run: |
-          aws s3 sync frontend/js/ s3://${{ secrets.S3_BUCKET_NAME }}/js/ \
-            --cache-control "public, max-age=86400" \
-            --content-type "application/javascript"
-          echo "JS files synced"
-
-      - name: Fix index.html content type
-        run: |
-          aws s3 cp \
-            s3://${{ secrets.S3_BUCKET_NAME }}/index.html \
+          aws s3 cp s3://${{ secrets.S3_BUCKET_NAME }}/index.html \
             s3://${{ secrets.S3_BUCKET_NAME }}/index.html \
             --metadata-directive REPLACE \
             --content-type "text/html; charset=utf-8" \
-            --cache-control "no-cache, no-store, must-revalidate"
+            --cache-control "no-cache"
 
-      - name: Verify deployment
+      - name: Verify
         run: |
           sleep 5
-          response=$(curl -s -o /dev/null -w "%{http_code}" \
-            ${{ secrets.S3_WEBSITE_URL }}/index.html)
-          echo "S3 response: $response"
-          if [ "$response" = "200" ]; then
-            echo "✅ Frontend deployed successfully!"
-          else
-            echo "❌ Frontend check failed: $response"
-            exit 1
-          fi
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" ${{ secrets.S3_WEBSITE_URL }}/index.html)
+          echo "Status: $STATUS"
+          [ "$STATUS" = "200" ] && echo "Deployed!" || exit 1
 
-      - name: Print deployment summary
+      - name: Summary
         if: success()
         run: |
-          echo "============================================"
-          echo " Frontend Deployment Summary"
-          echo "============================================"
-          echo " S3 Bucket  : ${{ secrets.S3_BUCKET_NAME }}"
-          echo " Website URL: ${{ secrets.S3_WEBSITE_URL }}"
-          echo " API Base   : ${{ secrets.API_GATEWAY_URL }}"
-          echo " Deployed at: $(date -u)"
-          echo " Commit     : ${{ github.sha }}"
-          echo "============================================"
-EOF
-
-echo "✅ deploy-frontend.yml fixed"
+          echo "URL: ${{ secrets.S3_WEBSITE_URL }}"
+          echo "API: ${{ secrets.API_GATEWAY_URL }}"
+          echo "Commit: ${{ github.sha }}"
