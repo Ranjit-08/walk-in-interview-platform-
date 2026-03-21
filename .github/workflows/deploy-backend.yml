@@ -24,19 +24,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: 'pip'
           cache-dependency-path: backend/requirements.txt
-
       - name: Install dependencies
         working-directory: backend
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt pytest
-
       - name: Create test .env
         working-directory: backend
         run: |
@@ -60,7 +57,6 @@ jobs:
           AWS_REGION=us-east-1
           BOOKING_CODE_PREFIX=WI
           ENVEOF
-
       - name: Run tests
         working-directory: backend
         run: pytest tests/ -v || echo "Tests done"
@@ -80,11 +76,10 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H ${{ secrets.EC2_PUBLIC_IP }} >> ~/.ssh/known_hosts
 
-      - name: Install all system packages
+      - name: Install system packages
         run: |
           ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'ENDSSH'
           set -e
-          echo "=== Installing system packages ==="
           sudo apt-get update -y
           sudo apt-get install -y \
             python3 python3-pip python3-venv \
@@ -98,8 +93,8 @@ jobs:
         run: |
           ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'ENDSSH'
           sudo mkdir -p /app
-          sudo chown -R ubuntu:ubuntu /app
           sudo mkdir -p /etc/walkin
+          sudo chown -R ubuntu:ubuntu /app
           echo "Directories created"
           ENDSSH
 
@@ -109,24 +104,13 @@ jobs:
           set -e
           cd /app
           if [ -d ".git" ]; then
-            echo "Repo exists — pulling latest"
+            echo "Repo exists - pulling latest"
             git fetch origin main
             git reset --hard origin/main
           else
             git clone https://github.com/Ranjit-08/walk-in-interview-platform-.git .
           fi
-          echo "Repo ready"
-          ENDSSH
-
-      - name: Setup Python venv
-        run: |
-          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'ENDSSH'
-          set -e
-          cd /app/backend
-          python3 -m venv venv
-          venv/bin/pip install --upgrade pip
-          venv/bin/pip install -r requirements.txt
-          echo "Python venv ready"
+          echo "Repo cloned"
           ENDSSH
 
       - name: Write .env file
@@ -155,9 +139,21 @@ jobs:
           BOOKING_CODE_PREFIX=WI
           ENVEOF
           sudo chmod 600 /etc/walkin/.env
+          rm -f /app/backend/.env
           ln -sf /etc/walkin/.env /app/backend/.env
           echo ".env created"
           EOF
+
+      - name: Setup Python venv
+        run: |
+          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'ENDSSH'
+          set -e
+          cd /app/backend
+          python3 -m venv venv
+          venv/bin/pip install --upgrade pip
+          venv/bin/pip install -r requirements.txt
+          echo "Python venv ready"
+          ENDSSH
 
       - name: Setup Nginx
         run: |
@@ -287,7 +283,8 @@ jobs:
           cd /app
           git fetch origin main
           git reset --hard origin/main
-          [ -L /app/backend/.env ] || ln -sf /etc/walkin/.env /app/backend/.env
+          rm -f /app/backend/.env
+          ln -sf /etc/walkin/.env /app/backend/.env
           ENDSSH
 
       - name: Install dependencies
