@@ -62,36 +62,55 @@ def list_jobs():
 
 @jobs_bp.route("/<int:job_id>", methods=["GET"])
 def get_job(job_id: int):
-    """Returns full details of a single job including its time slots."""
-    job = execute_one(
-        """
-        SELECT j.*, c.company_name, c.industry, c.website,
-               (j.total_slots - j.booked_slots) AS available_slots
-        FROM   jobs j
-        JOIN   companies c ON c.id = j.company_id
-        WHERE  j.id = :jid
-        """,
-        {"jid": job_id}
-    )
-    if not job:
-        return not_found("Job not found.")
+    try:
+        job = execute_one(
+            """
+            SELECT j.*, c.company_name, c.industry, c.website,
+                   (j.total_slots - j.booked_slots) AS available_slots
+            FROM   jobs j
+            JOIN   companies c ON c.id = j.company_id
+            WHERE  j.id = :jid
+            """,
+            {"jid": job_id}
+        )
 
-    slots = execute_query(
-        """
-        SELECT id, start_time, end_time, capacity,
-               booked_count, status,
-               (capacity - booked_count) AS remaining
-        FROM   slots
-        WHERE  job_id = :jid
-        ORDER  BY start_time
-        """,
-        {"jid": job_id}
-    )
+        if not job:
+            return not_found("Job not found.")
 
-    job["slots"] = slots
-    return success(job)
+        job = dict(job)
 
+        slots = execute_query(
+            """
+            SELECT id, start_time, end_time, capacity,
+                   booked_count, status,
+                   (capacity - booked_count) AS remaining
+            FROM   slots
+            WHERE  job_id = :jid
+            ORDER  BY start_time
+            """,
+            {"jid": job_id}
+        )
 
+        # ✅ FIX: properly indented function
+        def serialize_slot(s):
+            s = dict(s)
+            if s.get("start_time"):
+                s["start_time"] = str(s["start_time"])
+            if s.get("end_time"):
+                s["end_time"] = str(s["end_time"])
+            return s
+
+        # ✅ apply conversion
+        slots = [serialize_slot(s) for s in slots]
+
+        job["slots"] = slots
+        return success(job)
+
+    except Exception as e:
+        import traceback
+        print("ERROR:", str(e))
+        print(traceback.format_exc())
+        return error(str(e), 500)
 @jobs_bp.route("", methods=["POST"])
 @require_auth
 @require_company
