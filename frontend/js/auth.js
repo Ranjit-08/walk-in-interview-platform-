@@ -24,7 +24,7 @@ const Auth = (() => {
 
     // ── Login ─────────────────────────────────────────────────
     saveSession(tokens, profile) {
-      this.setToken(tokens.access_token);
+      this.setToken(tokens.id_token);
       this.setUser(profile);
       this.setRole(profile?.role || 'user');
     },
