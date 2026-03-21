@@ -76,73 +76,85 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H ${{ secrets.EC2_PUBLIC_IP }} >> ~/.ssh/known_hosts
 
-      - name: Install system packages
+      - name: Install packages + create dirs + clone repo
         run: |
           ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'ENDSSH'
           set -e
+
+          echo "=== Installing packages ==="
           sudo apt-get update -y
           sudo apt-get install -y \
             python3 python3-pip python3-venv \
             git curl nginx \
             pkg-config default-libmysqlclient-dev \
             gcc supervisor mysql-client openssl
-          echo "Packages installed"
-          ENDSSH
 
-      - name: Create directories
-        run: |
-          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'ENDSSH'
+          echo "=== Creating directories ==="
           sudo mkdir -p /app
           sudo mkdir -p /etc/walkin
           sudo chown -R ubuntu:ubuntu /app
-          echo "Directories created"
-          ENDSSH
 
-      - name: Clone repository
-        run: |
-          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'ENDSSH'
-          set -e
+          echo "=== Cloning repo ==="
           cd /app
           if [ -d ".git" ]; then
-            echo "Repo exists - pulling latest"
             git fetch origin main
             git reset --hard origin/main
           else
             git clone https://github.com/Ranjit-08/walk-in-interview-platform-.git .
           fi
-          echo "Repo cloned"
+
+          echo "=== All done ==="
+          ls /app/backend/
           ENDSSH
 
       - name: Write .env file
+        env:
+          FLASK_SECRET_KEY: ${{ secrets.FLASK_SECRET_KEY }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          COGNITO_USER_POOL_ID: ${{ secrets.COGNITO_USER_POOL_ID }}
+          COGNITO_APP_CLIENT_ID: ${{ secrets.COGNITO_APP_CLIENT_ID }}
+          SES_SENDER_EMAIL: ${{ secrets.SES_SENDER_EMAIL }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          S3_WEBSITE_URL: ${{ secrets.S3_WEBSITE_URL }}
         run: |
-          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} bash << EOF
-          sudo mkdir -p /etc/walkin
-          sudo tee /etc/walkin/.env > /dev/null << 'ENVEOF'
+          # Write .env locally first
+          cat > /tmp/walkin.env << ENVEOF
           FLASK_ENV=production
-          FLASK_SECRET_KEY=${{ secrets.FLASK_SECRET_KEY }}
+          FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
           PORT=5000
-          DB_HOST=${{ secrets.DB_HOST }}
+          DB_HOST=${DB_HOST}
           DB_PORT=3306
           DB_NAME=interview_platform
-          DB_USER=${{ secrets.DB_USER }}
-          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-          COGNITO_USER_POOL_ID=${{ secrets.COGNITO_USER_POOL_ID }}
-          COGNITO_APP_CLIENT_ID=${{ secrets.COGNITO_APP_CLIENT_ID }}
+          DB_USER=${DB_USER}
+          DB_PASSWORD=${DB_PASSWORD}
+          COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID}
+          COGNITO_APP_CLIENT_ID=${COGNITO_APP_CLIENT_ID}
           COGNITO_REGION=us-east-1
-          SES_SENDER_EMAIL=${{ secrets.SES_SENDER_EMAIL }}
+          SES_SENDER_EMAIL=${SES_SENDER_EMAIL}
           SES_REGION=us-east-1
           BEDROCK_REGION=us-east-1
           BEDROCK_MODEL_ID=amazon.titan-text-express-v1
-          GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}
-          FRONTEND_URL=${{ secrets.S3_WEBSITE_URL }}
+          GROQ_API_KEY=${GROQ_API_KEY}
+          FRONTEND_URL=${S3_WEBSITE_URL}
           AWS_REGION=us-east-1
           BOOKING_CODE_PREFIX=WI
           ENVEOF
+
+          # Copy to EC2
+          scp -i ~/.ssh/deploy_key /tmp/walkin.env \
+            ubuntu@${{ secrets.EC2_PUBLIC_IP }}:/tmp/walkin.env
+
+          # Move to correct location on EC2
+          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'ENDSSH'
+          sudo mv /tmp/walkin.env /etc/walkin/.env
           sudo chmod 600 /etc/walkin/.env
           rm -f /app/backend/.env
           ln -sf /etc/walkin/.env /app/backend/.env
-          echo ".env created"
-          EOF
+          echo ".env linked successfully"
+          ls -la /app/backend/.env
+          ENDSSH
 
       - name: Setup Python venv
         run: |
@@ -248,33 +260,50 @@ jobs:
           ssh-keyscan -H ${{ secrets.EC2_PUBLIC_IP }} >> ~/.ssh/known_hosts
 
       - name: Write .env on EC2
+        env:
+          FLASK_SECRET_KEY: ${{ secrets.FLASK_SECRET_KEY }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          COGNITO_USER_POOL_ID: ${{ secrets.COGNITO_USER_POOL_ID }}
+          COGNITO_APP_CLIENT_ID: ${{ secrets.COGNITO_APP_CLIENT_ID }}
+          SES_SENDER_EMAIL: ${{ secrets.SES_SENDER_EMAIL }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          S3_WEBSITE_URL: ${{ secrets.S3_WEBSITE_URL }}
         run: |
-          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} bash << EOF
-          sudo mkdir -p /etc/walkin
-          sudo tee /etc/walkin/.env > /dev/null << 'ENVEOF'
+          cat > /tmp/walkin.env << ENVEOF
           FLASK_ENV=production
-          FLASK_SECRET_KEY=${{ secrets.FLASK_SECRET_KEY }}
+          FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
           PORT=5000
-          DB_HOST=${{ secrets.DB_HOST }}
+          DB_HOST=${DB_HOST}
           DB_PORT=3306
           DB_NAME=interview_platform
-          DB_USER=${{ secrets.DB_USER }}
-          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-          COGNITO_USER_POOL_ID=${{ secrets.COGNITO_USER_POOL_ID }}
-          COGNITO_APP_CLIENT_ID=${{ secrets.COGNITO_APP_CLIENT_ID }}
+          DB_USER=${DB_USER}
+          DB_PASSWORD=${DB_PASSWORD}
+          COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID}
+          COGNITO_APP_CLIENT_ID=${COGNITO_APP_CLIENT_ID}
           COGNITO_REGION=us-east-1
-          SES_SENDER_EMAIL=${{ secrets.SES_SENDER_EMAIL }}
+          SES_SENDER_EMAIL=${SES_SENDER_EMAIL}
           SES_REGION=us-east-1
           BEDROCK_REGION=us-east-1
           BEDROCK_MODEL_ID=amazon.titan-text-express-v1
-          GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}
-          FRONTEND_URL=${{ secrets.S3_WEBSITE_URL }}
+          GROQ_API_KEY=${GROQ_API_KEY}
+          FRONTEND_URL=${S3_WEBSITE_URL}
           AWS_REGION=us-east-1
           BOOKING_CODE_PREFIX=WI
           ENVEOF
+
+          scp -i ~/.ssh/deploy_key /tmp/walkin.env \
+            ubuntu@${{ secrets.EC2_PUBLIC_IP }}:/tmp/walkin.env
+
+          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'ENDSSH'
+          sudo mkdir -p /etc/walkin
+          sudo mv /tmp/walkin.env /etc/walkin/.env
           sudo chmod 600 /etc/walkin/.env
-          [ -L /app/backend/.env ] || ln -sf /etc/walkin/.env /app/backend/.env
-          EOF
+          rm -f /app/backend/.env
+          ln -sf /etc/walkin/.env /app/backend/.env
+          echo ".env updated"
+          ENDSSH
 
       - name: Pull latest code
         run: |
@@ -287,16 +316,12 @@ jobs:
           ln -sf /etc/walkin/.env /app/backend/.env
           ENDSSH
 
-      - name: Install dependencies
+      - name: Install dependencies + Restart
         run: |
           ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'ENDSSH'
+          set -e
           cd /app/backend
           venv/bin/pip install -r requirements.txt --quiet
-          ENDSSH
-
-      - name: Restart app
-        run: |
-          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'ENDSSH'
           sudo supervisorctl restart walkin
           sleep 5
           response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/health)
