@@ -43,7 +43,7 @@ def chat_with_interviewer(message, history, role_title=None, job_description=Non
     messages.append({"role": "user", "content": message})
 
     payload = json.dumps({
-        "model": "llama3-8b-8192",
+        "model": "llama-3.1-8b-instant",
         "messages": messages,
         "max_tokens": 1024,
         "temperature": 0.7,
