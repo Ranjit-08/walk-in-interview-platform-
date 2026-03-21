@@ -76,38 +76,7 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H ${{ secrets.EC2_PUBLIC_IP }} >> ~/.ssh/known_hosts
 
-      - name: Install packages + create dirs + clone repo
-        run: |
-          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'ENDSSH'
-          set -e
-
-          echo "=== Installing packages ==="
-          sudo apt-get update -y
-          sudo apt-get install -y \
-            python3 python3-pip python3-venv \
-            git curl nginx \
-            pkg-config default-libmysqlclient-dev \
-            gcc supervisor mysql-client openssl
-
-          echo "=== Creating directories ==="
-          sudo mkdir -p /app
-          sudo mkdir -p /etc/walkin
-          sudo chown -R ubuntu:ubuntu /app
-
-          echo "=== Cloning repo ==="
-          cd /app
-          if [ -d ".git" ]; then
-            git fetch origin main
-            git reset --hard origin/main
-          else
-            git clone https://github.com/Ranjit-08/walk-in-interview-platform-.git .
-          fi
-
-          echo "=== All done ==="
-          ls /app/backend/
-          ENDSSH
-
-      - name: Write .env file
+      - name: Write .env locally
         env:
           FLASK_SECRET_KEY: ${{ secrets.FLASK_SECRET_KEY }}
           DB_HOST: ${{ secrets.DB_HOST }}
@@ -119,7 +88,6 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           S3_WEBSITE_URL: ${{ secrets.S3_WEBSITE_URL }}
         run: |
-          # Write .env locally first
           cat > /tmp/walkin.env << ENVEOF
           FLASK_ENV=production
           FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
@@ -141,35 +109,60 @@ jobs:
           AWS_REGION=us-east-1
           BOOKING_CODE_PREFIX=WI
           ENVEOF
+          echo "✅ .env written locally"
+          cat /tmp/walkin.env
 
-          # Copy to EC2
+      - name: Full EC2 Setup
+        run: |
+          # Copy .env to EC2 first
           scp -i ~/.ssh/deploy_key /tmp/walkin.env \
             ubuntu@${{ secrets.EC2_PUBLIC_IP }}:/tmp/walkin.env
 
-          # Move to correct location on EC2
+          # Run everything in ONE SSH session
           ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'ENDSSH'
+          set -e
+
+          echo "=== Step 1: Install packages ==="
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            python3 python3-pip python3-venv \
+            git curl nginx \
+            pkg-config default-libmysqlclient-dev \
+            gcc supervisor mysql-client openssl
+          echo "Packages installed"
+
+          echo "=== Step 2: Create directories ==="
+          sudo mkdir -p /app
+          sudo mkdir -p /etc/walkin
+          sudo chown -R ubuntu:ubuntu /app
+
+          echo "=== Step 3: Clone repo ==="
+          cd /app
+          if [ -d ".git" ]; then
+            git fetch origin main
+            git reset --hard origin/main
+          else
+            git clone https://github.com/Ranjit-08/walk-in-interview-platform-.git .
+          fi
+          echo "Repo ready"
+          ls /app/backend/
+
+          echo "=== Step 4: Setup .env ==="
           sudo mv /tmp/walkin.env /etc/walkin/.env
           sudo chmod 600 /etc/walkin/.env
           rm -f /app/backend/.env
           ln -sf /etc/walkin/.env /app/backend/.env
-          echo ".env linked successfully"
+          echo ".env linked"
           ls -la /app/backend/.env
-          ENDSSH
 
-      - name: Setup Python venv
-        run: |
-          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'ENDSSH'
-          set -e
+          echo "=== Step 5: Setup Python venv ==="
           cd /app/backend
           python3 -m venv venv
           venv/bin/pip install --upgrade pip
           venv/bin/pip install -r requirements.txt
           echo "Python venv ready"
-          ENDSSH
 
-      - name: Setup Nginx
-        run: |
-          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'ENDSSH'
+          echo "=== Step 6: Setup Nginx ==="
           sudo tee /etc/nginx/sites-available/walkin > /dev/null << 'NGINXEOF'
           server {
               listen 80;
@@ -192,11 +185,8 @@ jobs:
           sudo rm -f /etc/nginx/sites-enabled/default
           sudo nginx -t && sudo systemctl restart nginx
           echo "Nginx configured"
-          ENDSSH
 
-      - name: Setup Supervisor
-        run: |
-          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'ENDSSH'
+          echo "=== Step 7: Setup Supervisor ==="
           sudo tee /etc/supervisor/conf.d/walkin.conf > /dev/null << 'SUPEOF'
           [program:walkin]
           command=/app/backend/venv/bin/gunicorn --bind 0.0.0.0:5000 --workers 4 --timeout 120 wsgi:app
@@ -216,11 +206,8 @@ jobs:
           sleep 3
           sudo supervisorctl status walkin
           echo "Supervisor configured"
-          ENDSSH
 
-      - name: Apply database schema
-        run: |
-          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'ENDSSH'
+          echo "=== Step 8: Apply DB schema ==="
           mysql \
             -h ${{ secrets.DB_HOST }} \
             -u ${{ secrets.DB_USER }} \
@@ -234,6 +221,8 @@ jobs:
             -p"${{ secrets.DB_PASSWORD }}" \
             interview_platform \
             -e "SHOW TABLES;"
+
+          echo "=== All setup complete ==="
           ENDSSH
 
       - name: Health check
@@ -259,7 +248,7 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H ${{ secrets.EC2_PUBLIC_IP }} >> ~/.ssh/known_hosts
 
-      - name: Write .env on EC2
+      - name: Write .env locally
         env:
           FLASK_SECRET_KEY: ${{ secrets.FLASK_SECRET_KEY }}
           DB_HOST: ${{ secrets.DB_HOST }}
@@ -293,37 +282,39 @@ jobs:
           BOOKING_CODE_PREFIX=WI
           ENVEOF
 
+      - name: Deploy to EC2
+        run: |
+          # Copy .env to EC2
           scp -i ~/.ssh/deploy_key /tmp/walkin.env \
             ubuntu@${{ secrets.EC2_PUBLIC_IP }}:/tmp/walkin.env
 
+          # Deploy in ONE SSH session
           ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'ENDSSH'
+          set -e
+
+          echo "=== Updating .env ==="
           sudo mkdir -p /etc/walkin
           sudo mv /tmp/walkin.env /etc/walkin/.env
           sudo chmod 600 /etc/walkin/.env
           rm -f /app/backend/.env
           ln -sf /etc/walkin/.env /app/backend/.env
-          echo ".env updated"
-          ENDSSH
 
-      - name: Pull latest code
-        run: |
-          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'ENDSSH'
-          set -e
+          echo "=== Pulling latest code ==="
           cd /app
           git fetch origin main
           git reset --hard origin/main
           rm -f /app/backend/.env
           ln -sf /etc/walkin/.env /app/backend/.env
-          ENDSSH
 
-      - name: Install dependencies + Restart
-        run: |
-          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'ENDSSH'
-          set -e
+          echo "=== Installing dependencies ==="
           cd /app/backend
           venv/bin/pip install -r requirements.txt --quiet
+
+          echo "=== Restarting app ==="
           sudo supervisorctl restart walkin
           sleep 5
+
+          echo "=== Health check ==="
           response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/health)
           [ "$response" = "200" ] && echo "Health check passed!" || { tail -20 /var/log/walkin.err.log; exit 1; }
           ENDSSH
