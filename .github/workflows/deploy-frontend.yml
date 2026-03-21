@@ -1,58 +1,104 @@
+name: Deploy Frontend to S3
+
 on:
   push:
     branches: [main]
-    paths: ['frontend/**', '.github/workflows/deploy-frontend.yml']
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/deploy-frontend.yml'
   workflow_dispatch:
 
 jobs:
   validate:
     name: Validate Files
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
-      - name: Check files
+
+      - name: Check required files
         run: |
-          for f in "frontend/index.html" "frontend/pages/login.html" \
-            "frontend/pages/user-dashboard.html" "frontend/pages/browse-jobs.html" \
-            "frontend/pages/book-slot.html" "frontend/pages/company-dashboard.html" \
-            "frontend/pages/company-post-job.html" "frontend/pages/mock-interview.html" \
-            "frontend/js/api.js" "frontend/js/auth.js" "frontend/css/main.css"; do
-            [ -f "$f" ] && echo "OK: $f" || { echo "MISSING: $f"; exit 1; }
+          for f in \
+            "frontend/index.html" \
+            "frontend/pages/login.html" \
+            "frontend/pages/user-dashboard.html" \
+            "frontend/pages/browse-jobs.html" \
+            "frontend/pages/book-slot.html" \
+            "frontend/pages/company-dashboard.html" \
+            "frontend/pages/company-post-job.html" \
+            "frontend/pages/mock-interview.html" \
+            "frontend/js/api.js" \
+            "frontend/js/auth.js" \
+            "frontend/css/main.css"; do
+            [ -f "$f" ] && echo "OK: $f" || { echo "❌ MISSING: $f"; exit 1; }
           done
-      - name: Check API_BASE
+
+      - name: Validate API placeholder removed
         run: |
-          grep -q "your-api-gateway-url" frontend/js/api.js && { echo "ERROR: placeholder URL!"; exit 1; } || true
-          grep "API_BASE" frontend/js/api.js
+          if grep -q "your-api-gateway-url" frontend/js/api.js; then
+            echo "❌ ERROR: Placeholder API URL still present"
+            exit 1
+          fi
+
+      - name: Confirm API_BASE exists
+        run: |
+          grep -q "API_BASE" frontend/js/api.js || { echo "❌ API_BASE not found"; exit 1; }
 
   deploy:
     name: Upload to S3
     runs-on: ubuntu-latest
     needs: validate
+
     steps:
       - uses: actions/checkout@v4
-      - uses: aws-actions/configure-aws-credentials@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
-      - name: Inject API URL
+
+      - name: Inject API URL safely
         run: |
-          sed -i "s|https://your-api-gateway-url.execute-api.ap-south-1.amazonaws.com/prod|${{ secrets.API_GATEWAY_URL }}|g" frontend/js/api.js
+          sed -i "s|API_BASE = .*|API_BASE = '${{ secrets.API_GATEWAY_URL }}'|g" frontend/js/api.js
+          echo "Updated API_BASE:"
           grep "API_BASE" frontend/js/api.js
-      - name: Sync to S3
+
+      - name: Upload static files to S3
         run: |
           aws s3 sync frontend/ s3://${{ secrets.S3_BUCKET_NAME }}/ \
-            --delete --exclude "*.DS_Store" --exclude ".git/*"
-      - name: Fix index.html content type
+            --delete \
+            --exclude "*.DS_Store" \
+            --cache-control "max-age=31536000"
+
+      - name: Fix index.html (no cache)
         run: |
           aws s3 cp s3://${{ secrets.S3_BUCKET_NAME }}/index.html \
             s3://${{ secrets.S3_BUCKET_NAME }}/index.html \
             --metadata-directive REPLACE \
             --content-type "text/html; charset=utf-8" \
             --cache-control "no-cache"
-      - name: Verify
+
+      # OPTIONAL: CloudFront invalidation (only if using CDN)
+      - name: Invalidate CloudFront cache
+        if: ${{ secrets.CLOUDFRONT_ID != '' }}
         run: |
-          sleep 5
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" ${{ secrets.S3_WEBSITE_URL }}/index.html)
-          [ "$STATUS" = "200" ] && echo "Frontend live: ${{ secrets.S3_WEBSITE_URL }}" || exit 1
-WORKFLOW_NAME: Deploy Frontend to S3
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CLOUDFRONT_ID }} \
+            --paths "/*"
+
+      - name: Verify deployment
+        run: |
+          echo "Checking frontend..."
+          for i in {1..10}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" ${{ secrets.S3_WEBSITE_URL }}/index.html)
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ Frontend live: ${{ secrets.S3_WEBSITE_URL }}"
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "❌ Frontend failed to deploy"
+          exit 1
