@@ -12,7 +12,6 @@ jobs:
   deploy:
     name: Deploy Backend
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
@@ -23,7 +22,7 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H ${{ secrets.EC2_PUBLIC_IP }} >> ~/.ssh/known_hosts
 
-      - name: Write .env locally
+      - name: Write env file locally
         env:
           FLASK_SECRET_KEY: ${{ secrets.FLASK_SECRET_KEY }}
           DB_HOST: ${{ secrets.DB_HOST }}
@@ -56,21 +55,21 @@ FRONTEND_URL=${S3_WEBSITE_URL}
 AWS_REGION=us-east-1
 BOOKING_CODE_PREFIX=WI
 ENVEOF
-          echo "✅ .env written"
+          echo "env file written"
           cat /tmp/walkin.env
 
-      - name: Copy .env to EC2
+      - name: Copy env to EC2
         run: |
           scp -i ~/.ssh/deploy_key /tmp/walkin.env \
             ubuntu@${{ secrets.EC2_PUBLIC_IP }}:/tmp/walkin.env
-          echo "✅ .env copied to EC2"
+          echo "env copied to EC2"
 
       - name: Deploy to EC2
         run: |
           ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'ENDSSH'
           set -e
 
-          echo "=== Step 1: Install packages ==="
+          echo "--- Step 1: Install packages ---"
           sudo apt-get update -y
           sudo apt-get install -y \
             python3 python3-pip python3-venv \
@@ -79,12 +78,12 @@ ENVEOF
             gcc supervisor mysql-client openssl
           echo "Packages ready"
 
-          echo "=== Step 2: Create dirs ==="
+          echo "--- Step 2: Create dirs ---"
           sudo mkdir -p /app
           sudo mkdir -p /etc/walkin
           sudo chown -R ubuntu:ubuntu /app
 
-          echo "=== Step 3: Clone or update repo ==="
+          echo "--- Step 3: Clone or update repo ---"
           cd /app
           if [ -d ".git" ]; then
             git fetch origin main
@@ -94,16 +93,14 @@ ENVEOF
           fi
           echo "Repo ready"
 
-          echo "=== Step 4: Setup .env ==="
+          echo "--- Step 4: Setup env ---"
           sudo mv /tmp/walkin.env /etc/walkin/.env
           sudo chmod 600 /etc/walkin/.env
           rm -f /app/backend/.env
           ln -sf /etc/walkin/.env /app/backend/.env
-          echo ".env linked:"
           ls -la /app/backend/.env
-          cat /app/backend/.env
 
-          echo "=== Step 5: Python venv ==="
+          echo "--- Step 5: Python venv ---"
           cd /app/backend
           if [ ! -d "venv" ]; then
             python3 -m venv venv
@@ -112,7 +109,7 @@ ENVEOF
           venv/bin/pip install -r requirements.txt
           echo "venv ready"
 
-          echo "=== Step 6: Nginx ==="
+          echo "--- Step 6: Nginx ---"
           sudo tee /etc/nginx/sites-available/walkin > /dev/null << 'NGINXEOF'
 server {
     listen 80;
@@ -136,7 +133,7 @@ NGINXEOF
           sudo nginx -t && sudo systemctl restart nginx
           echo "Nginx ready"
 
-          echo "=== Step 7: Supervisor ==="
+          echo "--- Step 7: Supervisor ---"
           sudo tee /etc/supervisor/conf.d/walkin.conf > /dev/null << 'SUPEOF'
 [program:walkin]
 command=/app/backend/venv/bin/gunicorn --bind 0.0.0.0:5000 --workers 4 --timeout 120 wsgi:app
@@ -157,26 +154,26 @@ SUPEOF
           sudo supervisorctl status walkin
           echo "Supervisor ready"
 
-          echo "=== Step 8: Apply DB schema ==="
-          DB_HOST=$(grep DB_HOST /etc/walkin/.env | cut -d= -f2)
-          DB_USER=$(grep DB_USER /etc/walkin/.env | cut -d= -f2)
-          DB_PASS=$(grep DB_PASSWORD /etc/walkin/.env | cut -d= -f2)
+          echo "--- Step 8: Apply DB schema ---"
+          DB_HOST=$(grep ^DB_HOST /etc/walkin/.env | cut -d= -f2)
+          DB_USER=$(grep ^DB_USER /etc/walkin/.env | cut -d= -f2)
+          DB_PASS=$(grep ^DB_PASSWORD /etc/walkin/.env | cut -d= -f2)
           mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASS" interview_platform \
             < /app/backend/migrations/schema.sql || echo "Schema already applied"
           mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASS" interview_platform \
             -e "SHOW TABLES;"
 
-          echo "=== Step 9: Health check ==="
-          for i in {1..12}; do
+          echo "--- Step 9: Health check ---"
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/health)
             if [ "$STATUS" = "200" ]; then
-              echo "✅ Backend is live!"
+              echo "Backend is live!"
               exit 0
             fi
-            echo "Attempt $i: status=$STATUS, waiting..."
+            echo "Attempt $i: status=$STATUS waiting..."
             sleep 5
           done
-          echo "❌ Health check failed"
+          echo "Health check failed"
           tail -30 /var/log/walkin.err.log
           exit 1
           ENDSSH
@@ -186,4 +183,9 @@ SUPEOF
           sleep 10
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" ${{ secrets.API_GATEWAY_URL }}/health)
           echo "API Gateway status: $STATUS"
-          [ "$STATUS" = "200" ] && echo "✅ Deployed!" || exit 1
+          if [ "$STATUS" = "200" ]; then
+            echo "Deployed successfully!"
+          else
+            echo "Verification failed: $STATUS"
+            exit 1
+          fi
