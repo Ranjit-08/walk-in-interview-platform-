@@ -1,5 +1,3 @@
-# providers.tf — AWS provider configuration
-
 terraform {
   required_version = ">= 1.6.0"
 
@@ -14,12 +12,11 @@ terraform {
     }
   }
 
-  # Remote state stored in S3 (create this bucket manually before first apply)
   backend "s3" {
-    bucket         = "walkin-platform-tfstate"
-    key            = "prod/terraform.tfstate"
-    region         = "us-east-1"
-    encrypt        = true
+    bucket  = "walkin-tfstate-767397985067"
+    key     = "prod/terraform.tfstate"
+    region  = "us-east-1"
+    encrypt = true
   }
 }
 

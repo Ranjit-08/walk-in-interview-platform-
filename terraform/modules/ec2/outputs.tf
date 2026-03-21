@@ -12,7 +12,7 @@ output "public_ip" {
 
 output "public_dns" {
   description = "Public DNS of the EC2 instance"
-  value       = aws_instance.backend.public_dns
+  value       = aws_eip.backend.public_dns
 }
 
 output "api_gateway_url" {
