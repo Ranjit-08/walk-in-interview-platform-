@@ -1,82 +1,100 @@
 #!/bin/bash
-# deploy.sh — Manual deployment script (run from your local machine)
-# Usage: ./scripts/deploy.sh [backend|frontend|all]
-
 set -e
 
-DEPLOY_TARGET=${1:-all}
-EC2_IP=${EC2_PUBLIC_IP:-"YOUR_EC2_IP"}
-S3_BUCKET=${S3_BUCKET_NAME:-"walkin-platform-frontend-prod"}
-API_URL=${API_GATEWAY_URL:-"https://your-api-gateway-url/prod"}
+echo "--- Step 1: Install packages ---"
+sudo apt-get update -y
+sudo apt-get install -y \
+  python3 python3-pip python3-venv \
+  git curl nginx \
+  pkg-config default-libmysqlclient-dev \
+  gcc supervisor mysql-client openssl
 
-echo "================================================"
-echo " Walk-in Interview Platform — Manual Deploy"
-echo " Target: $DEPLOY_TARGET"
-echo "================================================"
+echo "--- Step 2: Create dirs ---"
+sudo mkdir -p /app /etc/walkin
+sudo chown -R ubuntu:ubuntu /app
 
-deploy_backend() {
-  echo ""
-  echo "--- Deploying Backend to EC2 ---"
+echo "--- Step 3: Clone or update repo ---"
+cd /app
+if [ -d ".git" ]; then
+  git fetch origin main
+  git reset --hard origin/main
+else
+  git clone https://github.com/Ranjit-08/walk-in-interview-platform-.git .
+fi
 
-  ssh -i ~/.ssh/your-keypair.pem ubuntu@$EC2_IP << 'ENDSSH'
-    set -e
-    echo "Pulling latest code..."
-    cd /app
-    git fetch origin main
-    git reset --hard origin/main
+echo "--- Step 4: Setup env ---"
+sudo mv /tmp/walkin.env /etc/walkin/.env
+sudo chmod 600 /etc/walkin/.env
+rm -f /app/backend/.env
+ln -sf /etc/walkin/.env /app/backend/.env
+ls -la /app/backend/.env
 
-    echo "Installing dependencies..."
-    /app/venv/bin/pip install -r /app/backend/requirements.txt --quiet
+echo "--- Step 5: Python venv ---"
+cd /app/backend
+if [ ! -d "venv" ]; then
+  python3 -m venv venv
+fi
+venv/bin/pip install --upgrade pip -q
+venv/bin/pip install -r requirements.txt -q
 
-    echo "Restarting application..."
-    sudo supervisorctl restart walkin
-    sleep 5
-
-    echo "Health check..."
-    curl -sf http://localhost:5000/health && echo " Backend OK!" || echo " Backend FAILED!"
-ENDSSH
-
-  echo "Backend deployment complete."
+echo "--- Step 6: Nginx ---"
+sudo bash -c 'cat > /etc/nginx/sites-available/walkin' << 'NGINXEOF'
+server {
+    listen 80;
+    server_name _;
+    client_max_body_size 10M;
+    location /health {
+        proxy_pass http://127.0.0.1:5000/health;
+    }
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 120s;
+    }
 }
+NGINXEOF
+sudo ln -sf /etc/nginx/sites-available/walkin /etc/nginx/sites-enabled/walkin
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t
+sudo systemctl restart nginx
 
-deploy_frontend() {
-  echo ""
-  echo "--- Deploying Frontend to S3 ---"
+echo "--- Step 7: Supervisor ---"
+sudo bash -c 'cat > /etc/supervisor/conf.d/walkin.conf' << 'SUPEOF'
+[program:walkin]
+command=/app/backend/venv/bin/gunicorn --bind 0.0.0.0:5000 --workers 4 --timeout 120 wsgi:app
+directory=/app/backend
+user=ubuntu
+autostart=true
+autorestart=true
+stderr_logfile=/var/log/walkin.err.log
+stdout_logfile=/var/log/walkin.out.log
+environment=HOME="/home/ubuntu",USER="ubuntu"
+SUPEOF
+sudo supervisorctl reread
+sudo supervisorctl update
+sudo supervisorctl restart walkin || sudo supervisorctl start walkin
+sleep 5
+sudo supervisorctl status walkin
 
-  # Inject API URL
-  sed -i.bak \
-    "s|https://your-api-gateway-url.execute-api.ap-south-1.amazonaws.com/prod|$API_URL|g" \
-    frontend/js/api.js
+echo "--- Step 8: Apply DB schema ---"
+DB_HOST=$(grep ^DB_HOST /etc/walkin/.env | cut -d= -f2)
+DB_USER=$(grep ^DB_USER /etc/walkin/.env | cut -d= -f2)
+DB_PASS=$(grep ^DB_PASSWORD /etc/walkin/.env | cut -d= -f2)
+mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASS" interview_platform < /app/backend/migrations/schema.sql || echo "Schema already applied"
+mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASS" interview_platform -e "SHOW TABLES;"
 
-  # Sync to S3
-  aws s3 sync frontend/ s3://$S3_BUCKET/ \
-    --delete \
-    --exclude "*.DS_Store" \
-    --cache-control "no-cache, no-store, must-revalidate"
-
-  # Restore original api.js
-  mv frontend/js/api.js.bak frontend/js/api.js
-
-  echo "Frontend deployed to: http://$S3_BUCKET.s3-website.ap-south-1.amazonaws.com"
-}
-
-# Run based on argument
-case $DEPLOY_TARGET in
-  backend)  deploy_backend ;;
-  frontend) deploy_frontend ;;
-  all)
-    deploy_backend
-    deploy_frontend
-    ;;
-  *)
-    echo "Usage: ./scripts/deploy.sh [backend|frontend|all]"
-    exit 1
-    ;;
-esac
-
-echo ""
-echo "================================================"
-echo " Deployment Complete!"
-echo " Frontend : http://$S3_BUCKET.s3-website.ap-south-1.amazonaws.com"
-echo " API      : $API_URL"
-echo "================================================"
+echo "--- Step 9: Health check ---"
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/health)
+  if [ "$STATUS" = "200" ]; then
+    echo "Backend is live!"
+    exit 0
+  fi
+  echo "Attempt $i: $STATUS - waiting..."
+  sleep 5
+done
+echo "Health check failed"
+tail -30 /var/log/walkin.err.log
+exit 1
