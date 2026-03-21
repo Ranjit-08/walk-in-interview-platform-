@@ -23,62 +23,167 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H ${{ secrets.EC2_PUBLIC_IP }} >> ~/.ssh/known_hosts
 
-      - name: Deploy to EC2 (Auto Setup + Deploy)
+      - name: Write .env locally
+        env:
+          FLASK_SECRET_KEY: ${{ secrets.FLASK_SECRET_KEY }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          COGNITO_USER_POOL_ID: ${{ secrets.COGNITO_USER_POOL_ID }}
+          COGNITO_APP_CLIENT_ID: ${{ secrets.COGNITO_APP_CLIENT_ID }}
+          SES_SENDER_EMAIL: ${{ secrets.SES_SENDER_EMAIL }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          S3_WEBSITE_URL: ${{ secrets.S3_WEBSITE_URL }}
         run: |
-          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << EOF
+          cat > /tmp/walkin.env << ENVEOF
+FLASK_ENV=production
+FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
+PORT=5000
+DB_HOST=${DB_HOST}
+DB_PORT=3306
+DB_NAME=interview_platform
+DB_USER=${DB_USER}
+DB_PASSWORD=${DB_PASSWORD}
+COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID}
+COGNITO_APP_CLIENT_ID=${COGNITO_APP_CLIENT_ID}
+COGNITO_REGION=us-east-1
+SES_SENDER_EMAIL=${SES_SENDER_EMAIL}
+SES_REGION=us-east-1
+BEDROCK_REGION=us-east-1
+BEDROCK_MODEL_ID=amazon.titan-text-express-v1
+GROQ_API_KEY=${GROQ_API_KEY}
+FRONTEND_URL=${S3_WEBSITE_URL}
+AWS_REGION=us-east-1
+BOOKING_CODE_PREFIX=WI
+ENVEOF
+          echo "✅ .env written"
+          cat /tmp/walkin.env
+
+      - name: Copy .env to EC2
+        run: |
+          scp -i ~/.ssh/deploy_key /tmp/walkin.env \
+            ubuntu@${{ secrets.EC2_PUBLIC_IP }}:/tmp/walkin.env
+          echo "✅ .env copied to EC2"
+
+      - name: Deploy to EC2
+        run: |
+          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'ENDSSH'
           set -e
 
-          echo "=== Step 1: Ensure base setup ==="
+          echo "=== Step 1: Install packages ==="
           sudo apt-get update -y
-          sudo apt-get install -y python3 python3-pip python3-venv git nginx supervisor
+          sudo apt-get install -y \
+            python3 python3-pip python3-venv \
+            git curl nginx \
+            pkg-config default-libmysqlclient-dev \
+            gcc supervisor mysql-client openssl
+          echo "Packages ready"
 
+          echo "=== Step 2: Create dirs ==="
           sudo mkdir -p /app
+          sudo mkdir -p /etc/walkin
           sudo chown -R ubuntu:ubuntu /app
 
-          echo "=== Step 2: Clone or update repo ==="
+          echo "=== Step 3: Clone or update repo ==="
           cd /app
           if [ -d ".git" ]; then
             git fetch origin main
             git reset --hard origin/main
           else
-            git clone https://github.com/${{ github.repository }} .
+            git clone https://github.com/Ranjit-08/walk-in-interview-platform-.git .
           fi
+          echo "Repo ready"
 
-          echo "=== Step 3: Setup backend ==="
+          echo "=== Step 4: Setup .env ==="
+          sudo mv /tmp/walkin.env /etc/walkin/.env
+          sudo chmod 600 /etc/walkin/.env
+          rm -f /app/backend/.env
+          ln -sf /etc/walkin/.env /app/backend/.env
+          echo ".env linked:"
+          ls -la /app/backend/.env
+          cat /app/backend/.env
+
+          echo "=== Step 5: Python venv ==="
           cd /app/backend
-
           if [ ! -d "venv" ]; then
             python3 -m venv venv
           fi
-
           venv/bin/pip install --upgrade pip
           venv/bin/pip install -r requirements.txt
+          echo "venv ready"
 
-          echo "=== Step 4: Configure Supervisor ==="
-          sudo tee /etc/supervisor/conf.d/walkin.conf > /dev/null << 'CONF'
+          echo "=== Step 6: Nginx ==="
+          sudo tee /etc/nginx/sites-available/walkin > /dev/null << 'NGINXEOF'
+server {
+    listen 80;
+    server_name _;
+    client_max_body_size 10M;
+    location /health {
+        proxy_pass http://127.0.0.1:5000/health;
+    }
+    location / {
+        proxy_pass         http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_read_timeout 120s;
+    }
+}
+NGINXEOF
+          sudo ln -sf /etc/nginx/sites-available/walkin /etc/nginx/sites-enabled/walkin
+          sudo rm -f /etc/nginx/sites-enabled/default
+          sudo nginx -t && sudo systemctl restart nginx
+          echo "Nginx ready"
+
+          echo "=== Step 7: Supervisor ==="
+          sudo tee /etc/supervisor/conf.d/walkin.conf > /dev/null << 'SUPEOF'
 [program:walkin]
-command=/app/backend/venv/bin/gunicorn --bind 0.0.0.0:5000 --workers 3 wsgi:app
+command=/app/backend/venv/bin/gunicorn --bind 0.0.0.0:5000 --workers 4 --timeout 120 wsgi:app
 directory=/app/backend
 user=ubuntu
 autostart=true
 autorestart=true
+stopasgroup=true
+killasgroup=true
 stderr_logfile=/var/log/walkin.err.log
 stdout_logfile=/var/log/walkin.out.log
-CONF
-
+environment=HOME="/home/ubuntu",USER="ubuntu"
+SUPEOF
           sudo supervisorctl reread
           sudo supervisorctl update
-          sudo supervisorctl restart walkin || true
+          sudo supervisorctl restart walkin || sudo supervisorctl start walkin
+          sleep 5
+          sudo supervisorctl status walkin
+          echo "Supervisor ready"
 
-          echo "=== Step 5: Health check ==="
-          for i in {1..10}; do
-            if curl -f http://localhost:5000/health; then
-              echo "✅ Backend is live"
+          echo "=== Step 8: Apply DB schema ==="
+          DB_HOST=$(grep DB_HOST /etc/walkin/.env | cut -d= -f2)
+          DB_USER=$(grep DB_USER /etc/walkin/.env | cut -d= -f2)
+          DB_PASS=$(grep DB_PASSWORD /etc/walkin/.env | cut -d= -f2)
+          mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASS" interview_platform \
+            < /app/backend/migrations/schema.sql || echo "Schema already applied"
+          mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASS" interview_platform \
+            -e "SHOW TABLES;"
+
+          echo "=== Step 9: Health check ==="
+          for i in {1..12}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/health)
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ Backend is live!"
               exit 0
             fi
+            echo "Attempt $i: status=$STATUS, waiting..."
             sleep 5
           done
-
-          echo "❌ Deployment failed"
+          echo "❌ Health check failed"
+          tail -30 /var/log/walkin.err.log
           exit 1
-          EOF
+          ENDSSH
+
+      - name: Verify via API Gateway
+        run: |
+          sleep 10
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" ${{ secrets.API_GATEWAY_URL }}/health)
+          echo "API Gateway status: $STATUS"
+          [ "$STATUS" = "200" ] && echo "✅ Deployed!" || exit 1
