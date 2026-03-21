@@ -23,7 +23,7 @@ BOOKING_ERRORS = {
 
 
 @bookings_bp.route("", methods=["POST"])
-# @require_auth
+@require_auth
 def create_booking():
     print("USER:", g.get("current_user"))
 
@@ -109,7 +109,7 @@ def my_bookings():
     return success(bookings)
 
 @bookings_bp.route("/active", methods=["GET"])
-# @require_auth
+@require_auth
 def active_booking():
     print("USER:", g.get("current_user"))
     """Returns the user's current active booking (if any)."""
